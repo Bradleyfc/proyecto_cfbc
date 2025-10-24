@@ -1,0 +1,105 @@
+{% extends 'blog/editores/base_editores.html' %}
+
+{% block titulo_pagina %}Gestionar Categorías{% endblock %}
+
+{% block contenido_editores %}
+<div class="row">
+    <!-- Formulario para nueva categoría -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-plus"></i> Nueva Categoría</h5>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="nombre" class="form-label">Nombre</label>
+                        <input type="text" class="form-control" id="nombre" name="nombre" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="descripcion" class="form-label">Descripción</label>
+                        <textarea class="form-control" id="descripcion" name="descripcion" rows="3"></textarea>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-save"></i> Crear Categoría
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Lista de categorías existentes -->
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-tags"></i> Categorías Existentes</h5>
+            </div>
+            <div class="card-body">
+                {% if categorias %}
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Nombre</th>
+                                    <th>Descripción</th>
+                                    <th>Noticias</th>
+                                    <th>Slug</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for categoria in categorias %}
+                                <tr>
+                                    <td><strong>{{ categoria.nombre }}</strong></td>
+                                    <td>{{ categoria.descripcion|truncatechars:50|default:"Sin descripción" }}</td>
+                                    <td>
+                                        <span class="badge bg-primary">{{ categoria.noticias.count }}</span>
+                                    </td>
+                                    <td><code>{{ categoria.slug }}</code></td>
+                                    <td>
+                                        <a href="{% url 'blog:categoria_noticias' categoria.slug %}" 
+                                           class="btn btn-sm btn-outline-primary" target="_blank">
+                                            <i class="fas fa-eye"></i> Ver
+                                        </a>
+                                        {% if user.is_staff %}
+                                            <a href="{% url 'admin:blog_categoria_change' categoria.pk %}" 
+                                               class="btn btn-sm btn-outline-secondary" target="_blank">
+                                                <i class="fas fa-edit"></i> Editar
+                                            </a>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="text-center py-4">
+                        <i class="fas fa-tags fa-3x text-muted mb-3"></i>
+                        <h5>No hay categorías</h5>
+                        <p class="text-muted">Crea la primera categoría usando el formulario de la izquierda.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Información adicional -->
+        <div class="card mt-3">
+            <div class="card-header">
+                <h6><i class="fas fa-info-circle"></i> Información</h6>
+            </div>
+            <div class="card-body">
+                <ul class="mb-0">
+                    <li>Las categorías se usan para organizar las noticias por temas.</li>
+                    <li>El slug se genera automáticamente basado en el nombre.</li>
+                    <li>No puedes eliminar categorías que tengan noticias asociadas.</li>
+                    {% if user.is_staff %}
+                        <li>Como administrador, puedes editar categorías desde el panel de Django Admin.</li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

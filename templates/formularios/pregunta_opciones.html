@@ -1,0 +1,344 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+{% load static %}
+
+{% block title %}Opciones de Respuesta{% endblock %}
+
+{% block messages %}
+{% if messages %}
+<div class="container mt-3">
+    {% for message in messages %}
+    <div class="alert alert-{{ message.tags }} alert-dismissible fade show mensaje-alerta" role="alert"
+        data-mensaje="{{ message }}">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+    // Eliminar mensajes duplicados
+    document.addEventListener('DOMContentLoaded', function () {
+        const mensajes = document.querySelectorAll('.mensaje-alerta');
+        const mensajesTexto = new Set();
+
+        mensajes.forEach(function (mensaje) {
+            const textoMensaje = mensaje.getAttribute('data-mensaje');
+
+            if (mensajesTexto.has(textoMensaje)) {
+                // Si ya existe un mensaje con este texto, eliminar el duplicado
+                mensaje.remove();
+            } else {
+                mensajesTexto.add(textoMensaje);
+            }
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h3>OPCIONES DE RESPUESTA</h3>
+</div>
+<hr>
+<br>
+
+<form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="pregunta_id" value="{{ pregunta.id }}">
+    
+    <div class="card mx-auto" style="width: 50rem;">
+        
+        <img src="{% static 'icono.jpg' %}" class="card-img-top" alt="logo del centro" style="max-width: 20%; height: auto; margin: 0 auto; display: block; padding-top: 5%;">
+        
+        <div class="card-body">
+            <h5 class="card-title text-center">{{ pregunta.texto }}</h5>
+            <p class="text-center text-muted">
+                Formulario: {{ formulario.titulo }} -
+                Curso: {{ formulario.curso.name }} -
+                Tipo: {{ pregunta.get_tipo_display }}
+            </p>
+            
+            <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 60%;">Texto de la opción</th>
+                                        <th style="width: 20%;">Orden</th>
+                                        <th style="width: 20%;">Eliminar</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="opciones-tbody">
+                                    {% for opcion in pregunta.opciones.all %}
+                                    <tr class="opcion-row" data-id="{{ opcion.id }}">
+                                        <td>
+                                            <input type="hidden" name="opcion_id_{{ forloop.counter0 }}" value="{{ opcion.id }}">
+                                            <div class="form-group">
+                                                <label for="texto_{{ forloop.counter0 }}">Texto de la opción</label>
+                                                <textarea name="texto_{{ forloop.counter0 }}" id="texto_{{ forloop.counter0 }}" rows="2" class="form-control" style="width: 100%; max-width: 400px;">{{ opcion.texto }}</textarea>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="form-group">
+                                                <label for="orden_{{ forloop.counter0 }}">Orden</label>
+                                                <input type="number" name="orden_{{ forloop.counter0 }}" id="orden_{{ forloop.counter0 }}" value="{{ opcion.orden }}" class="form-control" style="width: 80px;">
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                <input type="checkbox" name="eliminar_{{ forloop.counter0 }}" id="eliminar_{{ forloop.counter0 }}" style="display: none;">
+                                                <button type="button" class="btn btn-sm btn-danger eliminar-opcion ms-2" onclick="marcarParaEliminar(this)">
+                                                    <i class="bi bi-trash"></i> Eliminar
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                            <input type="hidden" name="total_opciones" id="total_opciones" value="{{ pregunta.opciones.count }}">
+            </div>
+
+            <div class="d-flex justify-content-between mt-4">
+                <a href="{% url 'principal:formulario_preguntas' formulario.id %}" class="btn btn-secondary">
+                  <i class="bi bi-arrow-left"></i> Volver
+                </a>
+                <button type="button" class="btn btn-success" id="agregar-opcion">
+                    <i class="bi bi-plus-circle"></i> Agregar Opciones
+                </button>
+                <button type="submit" class="btn btn-primary">
+                  <i class="bi bi-save"></i> Guardar Opciones
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<br>
+
+{% block extra_js %}
+<script>
+    // Asegurarse de que el script se ejecute solo una vez
+    if (window.opcionesScriptLoaded) {
+        console.log('Script ya cargado, evitando duplicación');
+    } else {
+        window.opcionesScriptLoaded = true;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            console.clear(); // Limpiar la consola para depuración
+            console.log('DOM cargado, inicializando script de opciones...');
+
+            // Ocultar las etiquetas de los campos DELETE
+            document.querySelectorAll('input[type="checkbox"][name$="-DELETE"]').forEach(function (checkbox) {
+                const label = checkbox.closest('div').querySelector('label');
+                if (label) {
+                    label.style.display = 'none';
+                }
+            });
+
+            // Inicializar los campos existentes para asegurarse de que los valores se establezcan correctamente
+            document.querySelectorAll('input[name*="-orden"]').forEach(function (input, index) {
+                // Solo procesar campos que no sean ocultos
+                if (input.type !== 'hidden') {
+                    // Asegurarse de que el valor se establezca como un atributo
+                    const currentValue = input.value || index;
+                    input.value = currentValue;
+                    input.setAttribute('value', currentValue);
+
+                    // Añadir eventos para mantener sincronizados los valores
+                    input.addEventListener('input', function () {
+                        const newValue = this.value || '0';
+                        this.setAttribute('value', newValue);
+                    });
+
+                    input.addEventListener('change', function () {
+                        const newValue = this.value || '0';
+                        this.setAttribute('value', newValue);
+                    });
+                }
+            });
+
+            // También inicializar los campos de texto (pueden ser textareas o inputs)
+            document.querySelectorAll('textarea[name*="-texto"], input[name*="-texto"]').forEach(function (field) {
+                console.log('Inicializando campo de texto:', field.id, 'valor actual:', field.value);
+
+                // Para inputs, asegurarse de que el valor se establezca como un atributo
+                if (field.tagName.toLowerCase() === 'input') {
+                    field.setAttribute('value', field.value);
+                }
+
+                // Añadir eventos para asegurarse de que el valor se guarde correctamente
+                field.addEventListener('input', function () {
+                    if (this.tagName.toLowerCase() === 'input') {
+                        this.setAttribute('value', this.value);
+                    }
+                    console.log('Texto actualizado en campo existente:', this.id, 'nuevo valor:', this.value);
+                });
+            });
+
+            // Función para marcar una opción para eliminar
+            window.marcarParaEliminar = function (button) {
+                const row = button.closest('.opcion-row');
+                const deleteCheckbox = row.querySelector('input[type="checkbox"][id^="eliminar_"]');
+
+                if (confirm('¿Estás seguro de que deseas eliminar esta opción de respuesta?')) {
+                    if (deleteCheckbox) {
+                        // Para opciones existentes, marcar el checkbox DELETE
+                        deleteCheckbox.checked = true;
+                        row.style.opacity = '0.5';
+                        button.textContent = 'Cancelar';
+                        button.classList.remove('btn-danger');
+                        button.classList.add('btn-warning');
+
+                        // Cambiar la función del botón para cancelar la eliminación
+                        button.onclick = function () {
+                            deleteCheckbox.checked = false;
+                            row.style.opacity = '1';
+                            button.innerHTML = '<i class="bi bi-trash"></i> Eliminar';
+                            button.classList.remove('btn-warning');
+                            button.classList.add('btn-danger');
+                            button.onclick = function () { marcarParaEliminar(button); };
+                        };
+                    } else {
+                        // Para opciones nuevas, eliminar la fila directamente
+                        row.remove();
+
+                        // Actualizar el contador de opciones
+                        const totalOpcionesInput = document.getElementById('total_opciones');
+                        if (totalOpcionesInput) {
+                            totalOpcionesInput.value = parseInt(totalOpcionesInput.value) - 1;
+                        }
+                    }
+                }
+            };
+
+            // Función para agregar una nueva opción de respuesta
+            const addButton = document.getElementById('agregar-opcion');
+            if (addButton) {
+                // Clonar y reemplazar el botón para eliminar cualquier event listener existente
+                const newAddButton = addButton.cloneNode(true);
+                addButton.parentNode.replaceChild(newAddButton, addButton);
+
+                // Variable para evitar múltiples clics
+                let isAddingOption = false;
+
+                // Añadir un único event listener al nuevo botón
+                newAddButton.addEventListener('click', function () {
+                    console.log('Botón agregar opción clickeado');
+
+                    // Evitar múltiples clics
+                    if (isAddingOption) {
+                        console.log('Ya se está procesando una adición de opción, ignorando clic');
+                        return;
+                    }
+
+                    isAddingOption = true;
+                    console.log('Agregando nueva opción...');
+
+                    try {
+                        // Obtener el número total de opciones actual
+                        const totalOpcionesInput = document.getElementById('total_opciones');
+                        if (!totalOpcionesInput) {
+                            alert('Error: No se pudo encontrar el contador de opciones.');
+                            return;
+                        }
+
+                        const currentCount = parseInt(totalOpcionesInput.value);
+                        console.log('Opciones actuales:', currentCount);
+
+                        // Crear una nueva fila
+                        const tbody = document.getElementById('opciones-tbody');
+                        const newRow = document.createElement('tr');
+                        newRow.className = 'opcion-row';
+                        newRow.dataset.id = 'new-' + currentCount;  // Marcar como nueva opción
+
+                        // Crear la celda para el texto
+                        const textoCell = document.createElement('td');
+                        textoCell.innerHTML = `
+                        <div class="form-group">
+                            <label for="texto_${currentCount}">Texto de la opción</label>
+                            <textarea name="texto_${currentCount}" id="texto_${currentCount}" rows="2" class="form-control" style="width: 100%; max-width: 400px;" placeholder="Escriba aquí el texto de la opción"></textarea>
+                        </div>
+                    `;
+
+                        // Crear la celda para el orden
+                        const ordenCell = document.createElement('td');
+                        ordenCell.innerHTML = `
+                        <div class="form-group">
+                            <label for="orden_${currentCount}">Orden</label>
+                            <input type="number" name="orden_${currentCount}" id="orden_${currentCount}" value="${currentCount}" class="form-control" style="width: 80px;">
+                        </div>
+                    `;
+
+                        // Crear la celda para el botón de eliminar
+                        const deleteCell = document.createElement('td');
+                        deleteCell.innerHTML = `
+                        <div class="d-flex align-items-center">
+                            <input type="checkbox" name="eliminar_${currentCount}" id="eliminar_${currentCount}" style="display: none;">
+                            <button type="button" class="btn btn-sm btn-danger eliminar-opcion ms-2" onclick="marcarParaEliminar(this)">
+                                <i class="bi bi-trash"></i> Eliminar
+                            </button>
+                        </div>
+                    `;
+
+                        // Agregar las celdas a la fila
+                        newRow.appendChild(textoCell);
+                        newRow.appendChild(ordenCell);
+                        newRow.appendChild(deleteCell);
+
+                        // Agregar la fila a la tabla
+                        tbody.appendChild(newRow);
+
+                        // Incrementar el contador de opciones
+                        totalOpcionesInput.value = currentCount + 1;
+                        console.log('Opción agregada. Nuevo total de opciones:', totalOpcionesInput.value);
+
+                        // Asegurarse de que el nuevo campo de texto esté correctamente inicializado
+                        const newTextField = document.getElementById(`texto_${currentCount}`);
+                        
+                        if (newTextField) {
+                            // Añadir evento para manejar cambios
+                            newTextField.addEventListener('input', function () {
+                                console.log('Texto actualizado en textarea:', this.value);
+                            });
+
+                            // También añadir evento para cuando el campo pierde el foco
+                            newTextField.addEventListener('blur', function () {
+                                console.log('Campo perdió el foco, valor final:', this.value);
+                            });
+
+                            // Enfocar el nuevo campo para facilitar la entrada de datos
+                            setTimeout(() => {
+                                newTextField.focus();
+                            }, 100);
+                        }
+
+                        // Asegurarse de que el nuevo campo de orden esté correctamente inicializado
+                        const newOrderField = document.getElementById(`orden_${currentCount}`);
+                        
+                        if (newOrderField) {
+                            // Establecer un valor predeterminado
+                            newOrderField.value = currentCount;
+                            
+                            // Añadir un evento para asegurarse de que el valor se establezca correctamente
+                            newOrderField.addEventListener('input', function () {
+                                console.log('Orden actualizado:', this.value);
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error al agregar opción:', error);
+                    } finally {
+                        // Liberar la bandera después de un breve retraso
+                        setTimeout(function () {
+                            isAddingOption = false;
+                            console.log('Bandera de adición liberada');
+                        }, 500);
+                    }
+                });
+            }
+        });
+    }
+</script>
+{% endblock %}
+{% endblock %}

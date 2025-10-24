@@ -1,0 +1,167 @@
+{% extends 'blog/base_blog.html' %}
+{% load static %}
+
+{% block title %}
+    {% if busqueda %}
+        Resultados para "{{ busqueda }}" - Noticias CFBC
+    {% else %}
+        Noticias - CFBC
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Contenido principal -->
+    <div class="col-lg-8">
+        {% if busqueda %}
+            <div class="alert alert-info">
+                <i class="fas fa-search"></i> 
+                Resultados de búsqueda para: <strong>"{{ busqueda }}"</strong>
+                ({{ page_obj.paginator.count }} resultado{{ page_obj.paginator.count|pluralize }})
+            </div>
+        {% endif %}
+
+        {% if page_obj %}
+            <div class="row">
+                {% for noticia in page_obj %}
+                    <div class="col-md-6 mb-4">
+                        <div class="card h-100 {% if noticia.destacada %}noticia-destacada{% endif %}">
+                            {% if noticia.imagen_principal %}
+                                <img src="{{ noticia.imagen_principal.url }}" class="card-img-top" alt="{{ noticia.titulo }}">
+                            {% else %}
+                                <div class="card-img-top bg-light d-flex align-items-center justify-content-center">
+                                    <i class="fas fa-newspaper fa-3x text-muted"></i>
+                                </div>
+                            {% endif %}
+                            
+                            <div class="card-body d-flex flex-column">
+                                {% if noticia.destacada %}
+                                    <span class="badge bg-warning text-dark mb-2">
+                                        <i class="fas fa-star"></i> Destacada
+                                    </span>
+                                {% endif %}
+                                
+                                <span class="badge bg-primary mb-2">{{ noticia.categoria.nombre }}</span>
+                                
+                                <h5 class="card-title">
+                                    <a href="{{ noticia.get_absolute_url }}" class="text-decoration-none">
+                                        {{ noticia.titulo }}
+                                    </a>
+                                </h5>
+                                
+                                <p class="card-text">{{ noticia.resumen }}</p>
+                                
+                                <div class="mt-auto">
+                                    <small class="text-muted">
+                                        <i class="fas fa-user"></i> {{ noticia.autor.get_full_name|default:noticia.autor.username }}
+                                        <br>
+                                        <i class="fas fa-calendar"></i> {{ noticia.fecha_publicacion|date:"d/m/Y" }}
+                                    </small>
+                                    
+                                    <div class="mt-2">
+                                        <a href="{{ noticia.get_absolute_url }}" class="btn btn-primary btn-sm">
+                                            Leer más <i class="fas fa-arrow-right"></i>
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <!-- Paginación -->
+            {% if page_obj.has_other_pages %}
+                <nav aria-label="Paginación de noticias">
+                    <ul class="pagination justify-content-center">
+                        {% if page_obj.has_previous %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page=1{% if busqueda %}&q={{ busqueda }}{% endif %}">
+                                    <i class="fas fa-angle-double-left"></i>
+                                </a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if busqueda %}&q={{ busqueda }}{% endif %}">
+                                    <i class="fas fa-angle-left"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+
+                        {% for num in page_obj.paginator.page_range %}
+                            {% if page_obj.number == num %}
+                                <li class="page-item active">
+                                    <span class="page-link">{{ num }}</span>
+                                </li>
+                            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                                <li class="page-item">
+                                    <a class="page-link" href="?page={{ num }}{% if busqueda %}&q={{ busqueda }}{% endif %}">{{ num }}</a>
+                                </li>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if page_obj.has_next %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if busqueda %}&q={{ busqueda }}{% endif %}">
+                                    <i class="fas fa-angle-right"></i>
+                                </a>
+                            </li>
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if busqueda %}&q={{ busqueda }}{% endif %}">
+                                    <i class="fas fa-angle-double-right"></i>
+                                </a>
+                            </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            {% endif %}
+        {% else %}
+            <div class="text-center py-5">
+                <i class="fas fa-newspaper fa-4x text-muted mb-3"></i>
+                <h3>No hay noticias disponibles</h3>
+                <p class="text-muted">Vuelve pronto para ver las últimas noticias.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar -->
+    <div class="col-lg-4">
+        <div class="sidebar">
+            <!-- Noticias destacadas -->
+            {% if noticias_destacadas %}
+                <h5><i class="fas fa-star text-warning"></i> Noticias Destacadas</h5>
+                {% for noticia in noticias_destacadas %}
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                <a href="{{ noticia.get_absolute_url }}" class="text-decoration-none">
+                                    {{ noticia.titulo|truncatechars:60 }}
+                                </a>
+                            </h6>
+                            <small class="text-muted">
+                                <i class="fas fa-calendar"></i> {{ noticia.fecha_publicacion|date:"d/m/Y" }}
+                            </small>
+                        </div>
+                    </div>
+                {% endfor %}
+                <hr>
+            {% endif %}
+
+            <!-- Categorías -->
+            <h5><i class="fas fa-tags"></i> Categorías</h5>
+            <div class="list-group">
+                <a href="{% url 'blog:lista_noticias' %}" 
+                   class="list-group-item list-group-item-action {% if not categoria_actual %}active{% endif %}">
+                    Todas las categorías
+                </a>
+                {% for categoria in categorias %}
+                    <a href="{% url 'blog:categoria_noticias' categoria.slug %}" 
+                       class="list-group-item list-group-item-action {% if categoria_actual == categoria.slug %}active{% endif %}">
+                        {{ categoria.nombre }}
+                        <span class="badge bg-secondary rounded-pill">{{ categoria.noticias.count }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

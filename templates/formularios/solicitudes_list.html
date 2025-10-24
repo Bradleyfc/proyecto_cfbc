@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block title %}Solicitudes de Inscripción{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="text-center">Solicitudes de Inscripción</h1>
+        </div>
+    </div>
+
+    <!-- Los mensajes ahora se muestran en base.html -->
+
+    <div class="row">
+        <div class="col">
+            {% if solicitudes %}
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>Estudiante</th>
+                            <th>Curso</th>
+                            <th>Fecha de Solicitud</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for solicitud in solicitudes %}
+                        <tr>
+                            <td>{{ solicitud.estudiante.get_full_name|default:solicitud.estudiante.username }}</td>
+                            <td>{{ solicitud.curso.name }}</td>
+                            <td>{{ solicitud.fecha_solicitud|date:"d/m/Y H:i" }}</td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <a href="{% url 'principal:solicitud_detail' solicitud.id %}"
+                                        class="btn btn-sm btn-outline-info">
+                                        <i class="bi bi-eye"></i> Ver
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                No hay solicitudes de inscripción pendientes.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

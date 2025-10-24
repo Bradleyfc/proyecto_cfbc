@@ -1,0 +1,134 @@
+{% extends 'blog/editores/base_editores.html' %}
+{% load crispy_forms_tags %}
+
+{% block titulo_pagina %}Nueva Noticia{% endblock %}
+
+{% block contenido_editores %}
+<div class="card">
+    <div class="card-header">
+        <h5><i class="fas fa-plus"></i> Crear Nueva Noticia</h5>
+    </div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            
+            <div class="row">
+                <div class="col-md-8">
+                    <!-- Información básica -->
+                    <div class="mb-3">
+                        {{ form.titulo.label_tag }}
+                        {{ form.titulo }}
+                        {% if form.titulo.errors %}
+                            <div class="text-danger">{{ form.titulo.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.resumen.label_tag }}
+                        {{ form.resumen }}
+                        <small class="form-text text-muted">Máximo 300 caracteres</small>
+                        {% if form.resumen.errors %}
+                            <div class="text-danger">{{ form.resumen.errors }}</div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.contenido.label_tag }}
+                        {{ form.contenido }}
+                        {% if form.contenido.errors %}
+                            <div class="text-danger">{{ form.contenido.errors }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <!-- Configuración -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>Configuración</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.categoria.label_tag }}
+                                {{ form.categoria }}
+                                {% if form.categoria.errors %}
+                                    <div class="text-danger">{{ form.categoria.errors }}</div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ form.estado.label_tag }}
+                                {{ form.estado }}
+                                {% if form.estado.errors %}
+                                    <div class="text-danger">{{ form.estado.errors }}</div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    {{ form.destacada }}
+                                    {{ form.destacada.label_tag }}
+                                </div>
+                                {% if form.destacada.errors %}
+                                    <div class="text-danger">{{ form.destacada.errors }}</div>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="mb-3">
+                                {{ form.fecha_publicacion.label_tag }}
+                                {{ form.fecha_publicacion }}
+                                {% if form.fecha_publicacion.errors %}
+                                    <div class="text-danger">{{ form.fecha_publicacion.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Imagen -->
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h6>Imagen Principal</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.imagen_principal }}
+                                {% if form.imagen_principal.errors %}
+                                    <div class="text-danger">{{ form.imagen_principal.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- SEO -->
+                    <div class="card mt-3">
+                        <div class="card-header">
+                            <h6>SEO</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                {{ form.meta_descripcion.label_tag }}
+                                {{ form.meta_descripcion }}
+                                <small class="form-text text-muted">Máximo 160 caracteres</small>
+                                {% if form.meta_descripcion.errors %}
+                                    <div class="text-danger">{{ form.meta_descripcion.errors }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <hr>
+            
+            <div class="d-flex justify-content-between">
+                <a href="{% url 'blog:mis_noticias' %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Crear Noticia
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends 'blog/editores/base_editores.html' %}
+
+{% block titulo_pagina %}Eliminar Noticia{% endblock %}
+
+{% block contenido_editores %}
+<div class="card border-danger">
+    <div class="card-header bg-danger text-white">
+        <h5><i class="fas fa-exclamation-triangle"></i> Confirmar Eliminación</h5>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-danger">
+            <strong>¡Atención!</strong> Esta acción no se puede deshacer. La noticia será eliminada permanentemente.
+        </div>
+        
+        <div class="row">
+            <div class="col-md-4">
+                {% if noticia.imagen_principal %}
+                    <img src="{{ noticia.imagen_principal.url }}" 
+                         class="img-fluid rounded" 
+                         alt="{{ noticia.titulo }}">
+                {% else %}
+                    <div class="bg-light d-flex align-items-center justify-content-center rounded" 
+                         style="height: 200px;">
+                        <i class="fas fa-newspaper fa-3x text-muted"></i>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="col-md-8">
+                <h4>{{ noticia.titulo }}</h4>
+                <p class="text-muted">{{ noticia.resumen }}</p>
+                
+                <div class="mb-2">
+                    {% if noticia.estado == 'publicado' %}
+                        <span class="badge bg-success">Publicado</span>
+                    {% elif noticia.estado == 'borrador' %}
+                        <span class="badge bg-warning">Borrador</span>
+                    {% else %}
+                        <span class="badge bg-secondary">Archivado</span>
+                    {% endif %}
+                    
+                    {% if noticia.destacada %}
+                        <span class="badge bg-warning text-dark">Destacada</span>
+                    {% endif %}
+                    
+                    <span class="badge bg-primary">{{ noticia.categoria.nombre }}</span>
+                </div>
+                
+                <small class="text-muted">
+                    <strong>Autor:</strong> {{ noticia.autor.get_full_name|default:noticia.autor.username }}<br>
+                    <strong>Creado:</strong> {{ noticia.fecha_creacion|date:"d/m/Y H:i" }}<br>
+                    <strong>Comentarios:</strong> {{ noticia.comentarios.count }}
+                </small>
+            </div>
+        </div>
+        
+        <hr>
+        
+        <form method="post">
+            {% csrf_token %}
+            <div class="d-flex justify-content-between">
+                <a href="{% url 'blog:editar_noticia' noticia.pk %}" class="btn btn-secondary">
+                    <i class="fas fa-arrow-left"></i> Cancelar
+                </a>
+                <button type="submit" class="btn btn-danger">
+                    <i class="fas fa-trash"></i> Sí, Eliminar Noticia
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

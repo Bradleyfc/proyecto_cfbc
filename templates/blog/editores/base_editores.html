@@ -1,0 +1,82 @@
+{% extends 'blog/base_blog.html' %}
+{% load static %}
+
+{% block extra_css %}
+<style>
+    .sidebar-editores {
+        background-color: #f8f9fa;
+        min-height: 100vh;
+        padding: 20px;
+    }
+    .nav-editores .nav-link {
+        color: #495057;
+        padding: 10px 15px;
+        margin-bottom: 5px;
+        border-radius: 5px;
+        transition: all 0.3s;
+    }
+    .nav-editores .nav-link:hover,
+    .nav-editores .nav-link.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .card-stat {
+        border-left: 4px solid #007bff;
+    }
+    .btn-editor {
+        margin-right: 10px;
+        margin-bottom: 10px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Sidebar de navegación -->
+    <div class="col-md-3">
+        <div class="sidebar-editores">
+            <h5><i class="fas fa-edit"></i> Panel de Editores</h5>
+            <hr>
+            <nav class="nav nav-editores flex-column">
+                <a class="nav-link {% if request.resolver_match.url_name == 'panel_editores' %}active{% endif %}" 
+                   href="{% url 'blog:panel_editores' %}">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                </a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'mis_noticias' %}active{% endif %}" 
+                   href="{% url 'blog:mis_noticias' %}">
+                    <i class="fas fa-newspaper"></i> Mis Noticias
+                </a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'crear_noticia' %}active{% endif %}" 
+                   href="{% url 'blog:crear_noticia' %}">
+                    <i class="fas fa-plus"></i> Nueva Noticia
+                </a>
+                <a class="nav-link {% if request.resolver_match.url_name == 'gestionar_categorias' %}active{% endif %}" 
+                   href="{% url 'blog:gestionar_categorias' %}">
+                    <i class="fas fa-tags"></i> Categorías
+                </a>
+                <hr>
+                <a class="nav-link" href="{% url 'blog:lista_noticias' %}">
+                    <i class="fas fa-eye"></i> Ver Noticias Públicas
+                </a>
+                {% if user.is_staff %}
+                <a class="nav-link" href="{% url 'admin:index' %}">
+                    <i class="fas fa-cog"></i> Admin Django
+                </a>
+                {% endif %}
+            </nav>
+        </div>
+    </div>
+    
+    <!-- Contenido principal -->
+    <div class="col-md-9">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>{% block titulo_pagina %}Panel de Editores{% endblock %}</h2>
+            <div>
+                {% block botones_accion %}{% endblock %}
+            </div>
+        </div>
+        
+        {% block contenido_editores %}{% endblock %}
+    </div>
+</div>
+{% endblock %}

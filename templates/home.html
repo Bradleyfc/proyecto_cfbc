@@ -1,0 +1,179 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<style>
+  .image-container {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .image-container img {
+    display: block;
+    width: 100%;
+    height: auto;
+    transition: transform 0.3s ease;
+  }
+
+  .image-container .overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    padding: 10px;
+  }
+
+  .image-container:hover .overlay {
+    opacity: 1;
+  }
+
+  .image-container:hover {
+    transform: scale(1.1); /* Increased scale for more noticeable growth */
+    z-index: 15; /* Bring to front */
+  }
+
+  .overlay h5,
+  .overlay p {
+    margin: 0;
+  }
+
+  .carousel-item img {
+    height: 150px; /* Adjust as needed */
+    object-fit: cover;
+  }
+
+  /* Estilos específicos para noticias */
+  #carouselNoticias .overlay h6 {
+    font-size: 0.9rem;
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+
+  #carouselNoticias .overlay p {
+    font-size: 0.75rem;
+    margin-bottom: 5px;
+  }
+
+  #carouselNoticias .overlay small {
+    font-size: 0.7rem;
+  }
+
+  #carouselNoticias .btn-sm {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+  }
+</style>
+
+<h1 class="display-4 fw-bold text-center my-5" style="text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);">CENTRO FRAY BARTOLOME DE LAS CASAS</h1>
+
+{% if request.user.is_authenticated %}
+<hr>
+<div class="container" >
+<h2 class="text-center">Bienvenido {{ user.username | upper }}</h2>
+</div>
+        {% endif %}
+<br>
+<br>
+<br>
+  <h3 class="text-center text-secondary">Nuestros Cursos</h3>
+
+<br>
+<br>  
+        
+        <div id="carouselCursos" class="carousel slide" data-bs-ride="carousel" style="max-width: 800px; margin: auto;">
+                <div class="carousel-inner">
+                  {% for group in grouped_courses %}
+                  <div class="carousel-item {% if forloop.first %}active{% endif %}">
+                    <div class="row">
+                      {% for course in group %}
+                      <div class="col-md-3">
+                        <div class="image-container">
+                          <img src="{% if course.image %}{{ course.image.url }}{% else %}{% static 'img/default_course.jpg' %}{% endif %}" class="d-block w-100 " alt="{{ course.name }}">
+                          <div class="overlay">
+                            <h5>{{ course.name }}</h5>
+                            <p>{{ course.description }}</p>
+                          </div>
+                        </div>
+                      </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                  {% endfor %}
+                </div>
+                <button class="carousel-control-prev" type="button" data-bs-target="#carouselCursos" data-bs-slide="prev">
+                  <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                  <span class="visually-hidden">Previous</span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#carouselCursos" data-bs-slide="next">
+                  <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                  <span class="visually-hidden">Next</span>
+                </button>
+              </div>
+
+<br>
+<br>
+<br>
+
+<!-- Sección de Noticias -->
+{% if grouped_noticias %}
+<h3 class="text-center text-secondary">Últimas Noticias</h3>
+
+<br>
+<br>
+
+<div id="carouselNoticias" class="carousel slide" data-bs-ride="carousel" style="max-width: 800px; margin: auto;">
+  <div class="carousel-inner">
+    {% for group in grouped_noticias %}
+    <div class="carousel-item {% if forloop.first %}active{% endif %}">
+      <div class="row">
+        {% for noticia in group %}
+        <div class="col-md-3">
+          <div class="image-container">
+            <img src="{% if noticia.imagen_principal %}{{ noticia.imagen_principal.url }}{% else %}{% static 'img/default_news.jpg' %}{% endif %}" class="d-block w-100" alt="{{ noticia.titulo }}">
+            <div class="overlay">
+              <h6>{{ noticia.titulo|truncatechars:50 }}</h6>
+              <p><small>{{ noticia.resumen|truncatechars:80 }}</small></p>
+              <small class="text-light">{{ noticia.fecha_publicacion|date:"d/m/Y" }}</small>
+              <br>
+              <a href="{% url 'blog:detalle_noticia' noticia.slug %}" class="btn btn-sm btn-primary mt-2">Leer más</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <button class="carousel-control-prev" type="button" data-bs-target="#carouselNoticias" data-bs-slide="prev">
+    <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+    <span class="visually-hidden">Previous</span>
+  </button>
+  <button class="carousel-control-next" type="button" data-bs-target="#carouselNoticias" data-bs-slide="next">
+    <span class="carousel-control-next-icon" aria-hidden="true"></span>
+    <span class="visually-hidden">Next</span>
+  </button>
+</div>
+
+<br>
+<div class="text-center">
+  <a href="{% url 'blog:lista_noticias' %}" class="btn btn-outline-primary">Ver todas las noticias</a>
+</div>
+{% endif %}
+        
+                
+
+
+
+
+
+{% endblock %}
