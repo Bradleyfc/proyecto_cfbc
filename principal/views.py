@@ -2131,6 +2131,11 @@ def aplicar_curso(request, curso_id):
                 for opcion_id in opcion_ids:
                     opcion = get_object_or_404(OpcionRespuesta, id=opcion_id)
                     respuesta.opciones_seleccionadas.add(opcion)
+            elif pregunta.tipo == 'seleccion_unica':
+                opcion_id = request.POST.get(f'pregunta_{pregunta.id}')
+                if opcion_id:
+                    opcion = get_object_or_404(OpcionRespuesta, id=opcion_id)
+                    respuesta.opciones_seleccionadas.add(opcion)
             elif pregunta.tipo == 'escritura_libre':
                 # Para preguntas de escritura libre, creamos una opción de respuesta con el texto ingresado
                 texto_respuesta = request.POST.get(f'pregunta_{pregunta.id}', '')

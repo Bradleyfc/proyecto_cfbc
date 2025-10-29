@@ -364,6 +364,14 @@ class RespuestaEstudianteForm(forms.Form):
                 required=pregunta.requerida,
                 widget=forms.CheckboxSelectMultiple
             )
+        elif pregunta.tipo == 'seleccion_unica':
+            opciones = [(opcion.id, opcion.texto) for opcion in pregunta.opciones.all()]
+            self.fields[f'pregunta_{pregunta.id}'] = forms.ChoiceField(
+                label=pregunta.texto,
+                choices=opciones,
+                required=pregunta.requerida,
+                widget=forms.RadioSelect
+            )
         elif pregunta.tipo == 'escritura_libre':
             self.fields[f'pregunta_{pregunta.id}'] = forms.CharField(
                 label=pregunta.texto,

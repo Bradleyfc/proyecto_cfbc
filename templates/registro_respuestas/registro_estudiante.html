@@ -180,6 +180,10 @@
                                                             {% for opcion in respuesta.opciones_seleccionadas.all %}
                                                                 <span class="badge bg-primary me-1 mb-1">{{ opcion.texto }}</span>
                                                             {% endfor %}
+                                                        {% elif respuesta.pregunta.tipo == 'seleccion_unica' %}
+                                                            {% for opcion in respuesta.opciones_seleccionadas.all %}
+                                                                <span class="badge bg-success me-1 mb-1">{{ opcion.texto }}</span>
+                                                            {% endfor %}
                                                         {% else %}
                                                             <!-- Para preguntas de escritura libre -->
                                                             {% for opcion in respuesta.opciones_seleccionadas.all %}

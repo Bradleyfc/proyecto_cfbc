@@ -262,6 +262,7 @@ class PreguntaFormulario(models.Model):
     """
     TIPO_CHOICES = [
         ('seleccion_multiple', 'Selección Múltiple'),
+        ('seleccion_unica', 'Selección Única'),
         ('escritura_libre', 'Escritura Libre'),
     ]
     
