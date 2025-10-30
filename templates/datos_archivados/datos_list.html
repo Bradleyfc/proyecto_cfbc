@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block title %}Datos Archivados{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h3 class="card-title mb-0">
+                        <i class="bi bi-table"></i>
+                        Datos Archivados
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <a href="{% url 'datos_archivados:dashboard' %}" class="btn btn-primary">
+                                <i class="bi bi-arrow-left"></i> Volver al Dashboard
+                            </a>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <span class="badge bg-info">Total: {{ datos|length }} registros</span>
+                        </div>
+                    </div>
+                    
+                    {% if datos %}
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Tabla</th>
+                                    <th>ID Original</th>
+                                    <th>Nombre</th>
+                                    <th>Fecha Migración</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for dato in datos %}
+                                <tr>
+                                    <td><span class="badge bg-secondary">{{ dato.tabla_origen }}</span></td>
+                                    <td>{{ dato.id_original }}</td>
+                                    <td>{{ dato.obtener_nombre_legible }}</td>
+                                    <td>{{ dato.fecha_migracion|date:"d/m/Y H:i" }}</td>
+                                    <td>
+                                        <a href="{% url 'datos_archivados:dato_detail' dato.pk %}" class="btn btn-sm btn-info">
+                                            <i class="bi bi-eye"></i> Ver
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <h5><i class="bi bi-info-circle"></i> No hay datos archivados</h5>
+                        <p>Aún no se han migrado datos desde la base de datos MariaDB.</p>
+                        <p>Para migrar datos:</p>
+                        <ol>
+                            <li>Vaya al <a href="{% url 'datos_archivados:dashboard' %}">Dashboard</a></li>
+                            <li>Haga clic en "Configurar Migración"</li>
+                            <li>Ingrese los datos de conexión de su base de datos MariaDB</li>
+                            <li>El sistema migrará automáticamente todos los datos</li>
+                        </ol>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

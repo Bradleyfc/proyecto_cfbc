@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - Datos Archivados{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="card-title mb-0">
+                        <i class="bi bi-hdd-stack"></i>
+                        Dashboard de Datos Archivados
+                    </h3>
+                </div>
+                <div class="card-body">
+                    {% if sin_permisos %}
+                    <div class="alert alert-danger">
+                        <h4><i class="bi bi-exclamation-triangle"></i> Sin Permisos</h4>
+                        <p>No tiene permisos para acceder a esta sección. Solo usuarios del grupo "Secretaria" pueden
+                            acceder.</p>
+                        <p><strong>Usuario actual:</strong> {{ user.username }}</p>
+                        <p><strong>Grupos:</strong>
+                            {% for grupo in user.groups.all %}
+                            {{ grupo.name }}{% if not forloop.last %}, {% endif %}
+                            {% empty %}
+                            Ninguno
+                            {% endfor %}
+                        </p>
+                        <div class="mt-3">
+                            <a href="{% url 'principal:profile' %}" class="btn btn-primary">Volver al Perfil</a>
+                            <a href="{% url 'datos_archivados:debug_permisos' %}" class="btn btn-info">Ver Debug</a>
+                        </div>
+                    </div>
+                    {% else %}
+
+                    <!-- Mensaje de bienvenida -->
+                    <div class="alert alert-success">
+                        <h4><i class="bi bi-check-circle"></i> ¡Sistema de Migración Automática Funcionando!</h4>
+                        <p><strong>Usuario:</strong> {{ user.username }}</p>
+                        <p>Bienvenido al sistema de migración automática de datos desde MariaDB.</p>
+                    </div>
+
+                    <!-- Estadísticas principales -->
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card bg-primary text-white">
+                                <div class="card-body text-center">
+                                    <h2>{{ total_datos_archivados|default:0 }}</h2>
+                                    <p class="mb-0">Registros Archivados</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-success text-white">
+                                <div class="card-body text-center">
+                                    <h2>{{ total_tablas_migradas|default:0 }}</h2>
+                                    <p class="mb-0">Tablas Migradas</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-info text-white">
+                                <div class="card-body text-center">
+                                    <h2>{% if ultima_migracion %}{{ ultima_migracion.fecha_inicio|date:"d/m/Y" }}{% else
+                                        %}N/A{% endif %}</h2>
+                                    <p class="mb-0">Última Migración</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-warning text-white">
+                                <div class="card-body text-center">
+                                    <h2>{% if ultima_migracion %}{{ ultima_migracion.estado|title }}{% else %}Inactivo{%
+                                        endif %}</h2>
+                                    <p class="mb-0">Estado</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Acciones principales -->
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <div class="card bg-primary text-white h-100">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-download display-4 mb-3"></i>
+                                    <h4>Migración Automática</h4>
+                                    <p>Configure y ejecute la migración desde su base de datos MariaDB remota</p>
+                                    <a href="{% url 'datos_archivados:configurar_migracion' %}"
+                                        class="btn btn-light btn-lg">
+                                        <i class="bi bi-gear"></i> Configurar Migración
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-success text-white h-100">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-table display-4 mb-3"></i>
+                                    <h4>Consultar Datos</h4>
+                                    <p>Explore y busque en todos los datos archivados migrados</p>
+                                    <a href="{% url 'datos_archivados:datos_list' %}" class="btn btn-light btn-lg">
+                                        <i class="bi bi-search"></i> Ver Datos Archivados
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Información del sistema -->
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5><i class="bi bi-info-circle"></i> Características del Sistema</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <ul class="list-unstyled">
+                                                <li><i class="bi bi-check-circle text-success"></i> <strong>Inspección
+                                                        automática</strong> de todas las tablas</li>
+                                                <li><i class="bi bi-check-circle text-success"></i> <strong>Modelos
+                                                        dinámicos</strong> creados automáticamente</li>
+                                            </ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <ul class="list-unstyled">
+                                                <li><i class="bi bi-check-circle text-success"></i> <strong>Migración
+                                                        inteligente</strong> de tipos de datos</li>
+                                                <li><i class="bi bi-check-circle text-success"></i>
+                                                    <strong>Almacenamiento flexible</strong> en formato JSON
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

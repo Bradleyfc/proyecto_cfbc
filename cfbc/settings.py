@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'principal',
     'accounts.apps.AccountsConfig',
     'blog.apps.BlogConfig',
+    'datos_archivados.apps.DatosArchivadosConfig',
     
     
 ]
