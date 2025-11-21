@@ -287,14 +287,14 @@ def estado_migracion_ajax(request):
         if migracion_en_progreso:
             data = {
                 'en_progreso': True,
-                'estado': migracion_en_progreso.estado,
+                'estado': migracion_en_progreso.estado or 'iniciada',
                 'fecha_inicio': migracion_en_progreso.fecha_inicio.isoformat(),
-                'total_migrados': migracion_en_progreso.usuarios_migrados,
-                'tablas_inspeccionadas': migracion_en_progreso.tablas_inspeccionadas,
-                'tablas_con_datos': migracion_en_progreso.tablas_con_datos,
-                'tablas_vacias': migracion_en_progreso.tablas_vacias,
-                'host_origen': migracion_en_progreso.host_origen,
-                'base_datos_origen': migracion_en_progreso.base_datos_origen,
+                'total_migrados': migracion_en_progreso.usuarios_migrados or 0,
+                'tablas_inspeccionadas': migracion_en_progreso.tablas_inspeccionadas or 0,
+                'tablas_con_datos': migracion_en_progreso.tablas_con_datos or 0,
+                'tablas_vacias': migracion_en_progreso.tablas_vacias or 0,
+                'host_origen': migracion_en_progreso.host_origen or 'N/A',
+                'base_datos_origen': migracion_en_progreso.base_datos_origen or 'N/A',
             }
         else:
             # Verificar si hay una migración completada recientemente (últimos 10 minutos)
@@ -308,13 +308,13 @@ def estado_migracion_ajax(request):
                 data = {
                     'en_progreso': False,
                     'completada_recientemente': True,
-                    'estado': migracion_reciente.estado,
+                    'estado': migracion_reciente.estado or 'completada',
                     'fecha_inicio': migracion_reciente.fecha_inicio.isoformat(),
                     'fecha_fin': migracion_reciente.fecha_fin.isoformat() if migracion_reciente.fecha_fin else None,
-                    'total_migrados': migracion_reciente.usuarios_migrados,
-                    'tablas_inspeccionadas': migracion_reciente.tablas_inspeccionadas,
-                    'tablas_con_datos': migracion_reciente.tablas_con_datos,
-                    'tablas_vacias': migracion_reciente.tablas_vacias,
+                    'total_migrados': migracion_reciente.usuarios_migrados or 0,
+                    'tablas_inspeccionadas': migracion_reciente.tablas_inspeccionadas or 0,
+                    'tablas_con_datos': migracion_reciente.tablas_con_datos or 0,
+                    'tablas_vacias': migracion_reciente.tablas_vacias or 0,
                 }
             else:
                 data = {
@@ -642,3 +642,92 @@ def debug_permisos(request):
     """
     
     return HttpResponse(info)
+
+@login_required
+def estado_migracion_ajax(request):
+    """Vista AJAX para obtener el estado actual de la migración"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return JsonResponse({'error': 'Sin permisos'}, status=403)
+    
+    try:
+        from django.http import JsonResponse
+        from .models import MigracionLog
+        from datetime import datetime, timedelta
+        
+        # Obtener la migración más reciente
+        ultima_migracion = MigracionLog.objects.order_by('-fecha_inicio').first()
+        
+        if not ultima_migracion:
+            return JsonResponse({
+                'en_progreso': False,
+                'completada_recientemente': False,
+                'estado': 'sin_migraciones',
+                'mensaje': 'No hay migraciones registradas'
+            })
+        
+        # Verificar si hay una migración en progreso
+        en_progreso = ultima_migracion.estado == 'en_progreso'
+        
+        # Verificar si se completó recientemente (últimos 5 minutos)
+        hace_5_minutos = datetime.now() - timedelta(minutes=5)
+        completada_recientemente = (
+            ultima_migracion.estado == 'completada' and 
+            ultima_migracion.fecha_fin and 
+            ultima_migracion.fecha_fin >= hace_5_minutos
+        )
+        
+        # Función helper para manejar valores None
+        def safe_int(value):
+            return value if value is not None else 0
+        
+        def safe_str(value):
+            return value if value is not None else ''
+        
+        # Calcular total de registros migrados
+        total_migrados = (
+            safe_int(ultima_migracion.usuarios_migrados) +
+            safe_int(ultima_migracion.cursos_academicos_migrados) +
+            safe_int(ultima_migracion.cursos_migrados) +
+            safe_int(ultima_migracion.matriculas_migradas) +
+            safe_int(ultima_migracion.calificaciones_migradas) +
+            safe_int(ultima_migracion.notas_migradas) +
+            safe_int(ultima_migracion.asistencias_migradas)
+        )
+        
+        # Preparar respuesta con manejo seguro de valores None
+        response_data = {
+            'en_progreso': en_progreso,
+            'completada_recientemente': completada_recientemente,
+            'estado': safe_str(ultima_migracion.estado),
+            'fecha_inicio': ultima_migracion.fecha_inicio.isoformat() if ultima_migracion.fecha_inicio else None,
+            'fecha_fin': ultima_migracion.fecha_fin.isoformat() if ultima_migracion.fecha_fin else None,
+            'host_origen': safe_str(ultima_migracion.host_origen) or 'N/A',
+            'base_datos_origen': safe_str(ultima_migracion.base_datos_origen) or 'N/A',
+            'tablas_inspeccionadas': safe_int(ultima_migracion.tablas_inspeccionadas),
+            'tablas_con_datos': safe_int(ultima_migracion.tablas_con_datos),
+            'tablas_vacias': safe_int(ultima_migracion.tablas_vacias),
+            'total_migrados': total_migrados,
+            'usuarios_migrados': safe_int(ultima_migracion.usuarios_migrados),
+            'cursos_migrados': safe_int(ultima_migracion.cursos_migrados),
+            'matriculas_migradas': safe_int(ultima_migracion.matriculas_migradas),
+            'errores': safe_str(ultima_migracion.errores),
+        }
+        
+        return JsonResponse(response_data)
+        
+    except Exception as e:
+        # Log del error para debugging
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error en estado_migracion_ajax: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # Respuesta de error segura (sin exponer detalles internos en producción)
+        return JsonResponse({
+            'error': 'Error interno del servidor',
+            'en_progreso': False,
+            'completada_recientemente': False,
+            'estado': 'error',
+            'mensaje': 'Error al obtener estado de migración'
+        })
