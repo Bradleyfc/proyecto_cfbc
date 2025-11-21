@@ -254,13 +254,18 @@ class MigracionLog(models.Model):
     usuario = models.ForeignKey(User, on_delete=models.CASCADE, verbose_name='Usuario que ejecutó la migración')
     
     # Contadores de registros migrados
-    usuarios_migrados = models.IntegerField(default=0, verbose_name='Usuarios Migrados')
+    usuarios_migrados = models.IntegerField(default=0, verbose_name='Registros Migrados')
     cursos_academicos_migrados = models.IntegerField(default=0, verbose_name='Cursos Académicos Migrados')
     cursos_migrados = models.IntegerField(default=0, verbose_name='Cursos Migrados')
     matriculas_migradas = models.IntegerField(default=0, verbose_name='Matrículas Migradas')
     calificaciones_migradas = models.IntegerField(default=0, verbose_name='Calificaciones Migradas')
     notas_migradas = models.IntegerField(default=0, verbose_name='Notas Migradas')
     asistencias_migradas = models.IntegerField(default=0, verbose_name='Asistencias Migradas')
+    
+    # Información sobre tablas inspeccionadas
+    tablas_inspeccionadas = models.IntegerField(default=0, verbose_name='Tablas Inspeccionadas')
+    tablas_con_datos = models.IntegerField(default=0, verbose_name='Tablas con Datos')
+    tablas_vacias = models.IntegerField(default=0, verbose_name='Tablas Vacías')
     
     # Información de errores
     errores = models.TextField(blank=True, verbose_name='Errores encontrados')

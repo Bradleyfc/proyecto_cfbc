@@ -1,0 +1,331 @@
+{% extends 'base.html' %}
+
+{% block title %}Tablas Archivadas{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header bg-success text-white">
+                    <h3 class="card-title mb-0">
+                        <i class="bi bi-table"></i>
+                        Tablas Archivadas
+                    </h3>
+                </div>
+                <div class="card-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <a href="{% url 'datos_archivados:dashboard' %}" class="btn btn-primary">
+                                <i class="bi bi-arrow-left"></i> Volver al Dashboard
+                            </a>
+                            <button type="button" class="btn btn-info" id="btnModoSeleccion">
+                                <i class="bi bi-check-square"></i> Seleccionar Tablas
+                            </button>
+                            <button type="button" class="btn btn-danger" id="btnEliminar" style="display: none;" disabled>
+                                <i class="bi bi-trash"></i> Eliminar Seleccionadas (<span id="contadorSeleccionadas">0</span>)
+                            </button>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <span class="badge bg-info fs-6">
+                                <i class="bi bi-table"></i> {{ total_tablas }} tablas | 
+                                <i class="bi bi-database"></i> {{ total_registros }} registros totales
+                            </span>
+                        </div>
+                    </div>
+                    
+                    {% if tablas_stats %}
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle"></i> Se encontraron <strong>{{ total_tablas }}</strong> tablas con datos archivados
+                    </div>
+                    
+                    <div class="row">
+                        {% for tabla in tablas_stats %}
+                        <div class="col-md-6 col-lg-4 mb-4">
+                            <div class="card h-100 shadow-sm hover-shadow tabla-card" data-tabla="{{ tabla.tabla_origen }}">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <h5 class="card-title mb-0 flex-grow-1">
+                                            <i class="bi bi-table text-primary"></i>
+                                            {{ tabla.tabla_origen }}
+                                        </h5>
+                                        <div class="form-check checkbox-seleccion" style="display: none;">
+                                            <input class="form-check-input tabla-checkbox fs-4" type="checkbox" 
+                                                   value="{{ tabla.tabla_origen }}" 
+                                                   id="check_{{ forloop.counter }}"
+                                                   style="cursor: pointer; width: 1.5em; height: 1.5em;">
+                                        </div>
+                                    </div>
+                                    <hr>
+                                    <div class="mb-3">
+                                        <p class="mb-2">
+                                            <i class="bi bi-database text-info"></i>
+                                            <strong>Registros:</strong> 
+                                            <span class="badge bg-info">{{ tabla.total_registros }}</span>
+                                        </p>
+                                        <p class="mb-2">
+                                            <i class="bi bi-clock text-secondary"></i>
+                                            <strong>Última migración:</strong><br>
+                                            <small>{{ tabla.ultima_migracion|date:"d/m/Y H:i" }}</small>
+                                        </p>
+                                    </div>
+                                    <a href="{% url 'datos_archivados:datos_list' tabla.tabla_origen %}" 
+                                       class="btn btn-success w-100 btn-ver-registros">
+                                        <i class="bi bi-eye"></i> Ver Registros
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="alert alert-info">
+                        <h5><i class="bi bi-info-circle"></i> No hay datos archivados</h5>
+                        <p>Aún no se han migrado datos desde la base de datos MariaDB.</p>
+                        <p>Para migrar datos:</p>
+                        <ol>
+                            <li>Vaya al <a href="{% url 'datos_archivados:dashboard' %}">Dashboard</a></li>
+                            <li>Haga clic en "Configurar Migración"</li>
+                            <li>Ingrese los datos de conexión de su base de datos MariaDB</li>
+                            <li>El sistema migrará automáticamente todos los datos</li>
+                        </ol>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Confirmación de Eliminación -->
+<div class="modal fade" id="modalConfirmacionEliminacion" tabindex="-1" aria-labelledby="modalConfirmacionLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="modalConfirmacionLabel">
+                    <i class="bi bi-exclamation-triangle"></i> Confirmar Eliminación
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>¡ADVERTENCIA!</strong> Esta acción no se puede deshacer.
+                </div>
+                <p class="mb-3">Está a punto de eliminar <strong id="cantidadTablas">0</strong> tabla(s) y todos sus registros.</p>
+                <div class="mb-3">
+                    <strong>Tablas a eliminar:</strong>
+                    <ul id="listaTablas" class="mt-2"></ul>
+                </div>
+                <p class="text-danger mb-0">
+                    <i class="bi bi-info-circle"></i>
+                    Se eliminarán permanentemente todos los datos de estas tablas.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Cancelar
+                </button>
+                <button type="button" class="btn btn-danger" id="btnConfirmarEliminacion">
+                    <i class="bi bi-trash"></i> Sí, Eliminar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.hover-shadow {
+    transition: all 0.3s ease;
+}
+.hover-shadow:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+.tabla-card.seleccionada {
+    border: 3px solid #0d6efd !important;
+    background-color: #e7f3ff !important;
+    box-shadow: 0 0 15px rgba(13, 110, 253, 0.3) !important;
+}
+.checkbox-seleccion {
+    margin-left: 10px;
+}
+.tabla-checkbox {
+    cursor: pointer !important;
+    width: 1.5em !important;
+    height: 1.5em !important;
+    border: 2px solid #0d6efd !important;
+}
+.tabla-checkbox:checked {
+    background-color: #0d6efd !important;
+    border-color: #0d6efd !important;
+}
+.tabla-checkbox:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 5px rgba(13, 110, 253, 0.5);
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let modoSeleccion = false;
+    const btnModoSeleccion = document.getElementById('btnModoSeleccion');
+    const btnEliminar = document.getElementById('btnEliminar');
+    const contadorSeleccionadas = document.getElementById('contadorSeleccionadas');
+    const checkboxes = document.querySelectorAll('.tabla-checkbox');
+    const checkboxContainers = document.querySelectorAll('.checkbox-seleccion');
+    const botonesVerRegistros = document.querySelectorAll('.btn-ver-registros');
+    
+    // Activar/desactivar modo selección
+    btnModoSeleccion.addEventListener('click', function() {
+        modoSeleccion = !modoSeleccion;
+        
+        if (modoSeleccion) {
+            // Activar modo selección
+            btnModoSeleccion.innerHTML = '<i class="bi bi-x-circle"></i> Cancelar Selección';
+            btnModoSeleccion.classList.remove('btn-info');
+            btnModoSeleccion.classList.add('btn-secondary');
+            btnEliminar.style.display = 'inline-block';
+            
+            // Mostrar checkboxes con animación
+            checkboxContainers.forEach(container => {
+                container.style.display = 'flex';
+                container.style.alignItems = 'center';
+            });
+            
+            // Deshabilitar botones de ver registros
+            botonesVerRegistros.forEach(btn => {
+                btn.style.pointerEvents = 'none';
+                btn.style.opacity = '0.5';
+            });
+            
+            // Agregar clase a las tarjetas para indicar modo selección
+            document.querySelectorAll('.tabla-card').forEach(card => {
+                card.style.cursor = 'pointer';
+            });
+        } else {
+            // Desactivar modo selección
+            btnModoSeleccion.innerHTML = '<i class="bi bi-check-square"></i> Seleccionar Tablas';
+            btnModoSeleccion.classList.remove('btn-secondary');
+            btnModoSeleccion.classList.add('btn-info');
+            btnEliminar.style.display = 'none';
+            
+            // Ocultar checkboxes y desmarcar
+            checkboxContainers.forEach(container => {
+                container.style.display = 'none';
+            });
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+            
+            // Remover clase seleccionada
+            document.querySelectorAll('.tabla-card').forEach(card => {
+                card.classList.remove('seleccionada');
+            });
+            
+            // Habilitar botones de ver registros
+            botonesVerRegistros.forEach(btn => {
+                btn.style.pointerEvents = 'auto';
+                btn.style.opacity = '1';
+            });
+            
+            actualizarContador();
+        }
+    });
+    
+    // Manejar cambios en checkboxes
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const card = this.closest('.tabla-card');
+            if (this.checked) {
+                card.classList.add('seleccionada');
+            } else {
+                card.classList.remove('seleccionada');
+            }
+            actualizarContador();
+        });
+    });
+    
+    // Permitir seleccionar haciendo clic en la tarjeta (solo en modo selección)
+    document.querySelectorAll('.tabla-card').forEach(card => {
+        card.addEventListener('click', function(e) {
+            // Solo si está en modo selección y no se hizo clic en el botón o checkbox
+            if (modoSeleccion && !e.target.closest('.btn-ver-registros') && !e.target.closest('.tabla-checkbox')) {
+                const checkbox = this.querySelector('.tabla-checkbox');
+                if (checkbox) {
+                    checkbox.checked = !checkbox.checked;
+                    checkbox.dispatchEvent(new Event('change'));
+                }
+            }
+        });
+    });
+    
+    // Actualizar contador y estado del botón eliminar
+    function actualizarContador() {
+        const seleccionadas = document.querySelectorAll('.tabla-checkbox:checked').length;
+        contadorSeleccionadas.textContent = seleccionadas;
+        btnEliminar.disabled = seleccionadas === 0;
+    }
+    
+    // Manejar eliminación - Mostrar modal
+    btnEliminar.addEventListener('click', function() {
+        const seleccionadas = Array.from(document.querySelectorAll('.tabla-checkbox:checked'))
+            .map(cb => cb.value);
+        
+        if (seleccionadas.length === 0) return;
+        
+        // Actualizar contenido del modal
+        document.getElementById('cantidadTablas').textContent = seleccionadas.length;
+        
+        const listaTablas = document.getElementById('listaTablas');
+        listaTablas.innerHTML = '';
+        seleccionadas.forEach(tabla => {
+            const li = document.createElement('li');
+            li.innerHTML = `<i class="bi bi-table text-danger"></i> <strong>${tabla}</strong>`;
+            listaTablas.appendChild(li);
+        });
+        
+        // Mostrar modal
+        const modal = new bootstrap.Modal(document.getElementById('modalConfirmacionEliminacion'));
+        modal.show();
+    });
+    
+    // Confirmar eliminación desde el modal
+    document.getElementById('btnConfirmarEliminacion').addEventListener('click', function() {
+        const seleccionadas = Array.from(document.querySelectorAll('.tabla-checkbox:checked'))
+            .map(cb => cb.value);
+        
+        if (seleccionadas.length === 0) return;
+        
+        // Crear formulario y enviar
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '{% url "datos_archivados:eliminar_tablas" %}';
+        
+        // CSRF token
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]');
+        if (csrfToken) {
+            form.appendChild(csrfToken.cloneNode());
+        } else {
+            const csrfInput = document.createElement('input');
+            csrfInput.type = 'hidden';
+            csrfInput.name = 'csrfmiddlewaretoken';
+            csrfInput.value = '{{ csrf_token }}';
+            form.appendChild(csrfInput);
+        }
+        
+        // Agregar tablas seleccionadas
+        seleccionadas.forEach(tabla => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'tablas';
+            input.value = tabla;
+            form.appendChild(input);
+        });
+        
+        document.body.appendChild(form);
+        form.submit();
+    });
+});
+</script>
+{% endblock %}

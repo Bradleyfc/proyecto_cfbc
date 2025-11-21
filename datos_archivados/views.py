@@ -1,10 +1,11 @@
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.views.generic import TemplateView
 from django.utils.decorators import method_decorator
 from django.db.models import Count
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
+import json
 
 def es_secretaria(user):
     """Verifica si el usuario pertenece al grupo Secretaria"""
@@ -58,11 +59,30 @@ class DashboardArchivadosView(TemplateView):
         try:
             from .models import DatoArchivadoDinamico, MigracionLog
             
+            # Estadísticas actuales basadas en datos existentes
+            total_datos_actuales = DatoArchivadoDinamico.objects.count()
+            total_tablas_actuales = DatoArchivadoDinamico.objects.values('tabla_origen').distinct().count()
+            ultima_migracion = MigracionLog.objects.first()
+            
+            # Calcular estadísticas dinámicas
+            if total_datos_actuales > 0:
+                # Hay datos: usar estadísticas reales
+                tablas_inspeccionadas = ultima_migracion.tablas_inspeccionadas if ultima_migracion else 0
+                tablas_con_datos = total_tablas_actuales  # Basado en datos actuales
+                tablas_vacias = max(0, tablas_inspeccionadas - tablas_con_datos)  # Calculado dinámicamente
+            else:
+                # No hay datos: todo en cero
+                tablas_inspeccionadas = 0
+                tablas_con_datos = 0
+                tablas_vacias = 0
+            
             # Estadísticas básicas
             context.update({
-                'total_datos_archivados': DatoArchivadoDinamico.objects.count(),
-                'total_tablas_migradas': DatoArchivadoDinamico.objects.values('tabla_origen').distinct().count(),
-                'ultima_migracion': MigracionLog.objects.first(),
+                'total_datos_archivados': total_datos_actuales,
+                'total_tablas_migradas': tablas_con_datos,
+                'ultima_migracion': ultima_migracion,
+                'tablas_inspeccionadas_actuales': tablas_inspeccionadas,
+                'tablas_vacias_actuales': tablas_vacias,
             })
             
             # Distribución por tabla (primeras 10)
@@ -142,15 +162,71 @@ def configurar_migracion_view(request):
 
 @login_required
 def detalle_dato_archivado(request, pk):
-    """Vista temporal para detalle"""
+    """Vista para mostrar el detalle completo de un dato archivado"""
     if not tiene_permisos_datos_archivados(request.user):
         return render(request, 'datos_archivados/sin_permisos.html', status=403)
     
-    return render(request, 'datos_archivados/dashboard.html')
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.shortcuts import get_object_or_404
+        import json
+        
+        # Obtener el dato archivado
+        dato = get_object_or_404(DatoArchivadoDinamico, pk=pk)
+        
+        # Preparar los datos para mostrar
+        context = {
+            'dato': dato,
+            'datos_formateados': json.dumps(dato.datos_originales, indent=2, ensure_ascii=False),
+            'estructura_formateada': json.dumps(
+                json.loads(dato.estructura_tabla) if dato.estructura_tabla else {}, 
+                indent=2, ensure_ascii=False
+            ) if dato.estructura_tabla else None,
+        }
+        
+        return render(request, 'datos_archivados/dato_detail.html', context)
+        
+    except Exception as e:
+        messages.error(request, f'Error al cargar el detalle: {str(e)}')
+        return redirect('datos_archivados:datos_list')
+
+@method_decorator(login_required, name='dispatch')
+class TablasArchivadosListView(TemplateView):
+    """Vista para listar las tablas archivadas disponibles"""
+    template_name = 'datos_archivados/tablas_list.html'
+    
+    def dispatch(self, request, *args, **kwargs):
+        if not tiene_permisos_datos_archivados(request.user):
+            return render(request, 'datos_archivados/sin_permisos.html', status=403)
+        return super().dispatch(request, *args, **kwargs)
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        
+        try:
+            from .models import DatoArchivadoDinamico
+            from django.db.models import Count, Max
+            
+            # Obtener estadísticas por tabla
+            tablas_stats = DatoArchivadoDinamico.objects.values('tabla_origen').annotate(
+                total_registros=Count('id'),
+                ultima_migracion=Max('fecha_migracion')
+            ).order_by('tabla_origen')
+            
+            context['tablas_stats'] = tablas_stats
+            context['total_tablas'] = tablas_stats.count()
+            context['total_registros'] = DatoArchivadoDinamico.objects.count()
+            
+        except Exception as e:
+            context['tablas_stats'] = []
+            context['total_tablas'] = 0
+            context['total_registros'] = 0
+        
+        return context
 
 @method_decorator(login_required, name='dispatch')
 class DatosArchivadosListView(TemplateView):
-    """Vista para listar datos archivados dinámicos"""
+    """Vista para listar datos archivados de una tabla específica"""
     template_name = 'datos_archivados/datos_list.html'
     
     def dispatch(self, request, *args, **kwargs):
@@ -164,25 +240,31 @@ class DatosArchivadosListView(TemplateView):
         try:
             from .models import DatoArchivadoDinamico
             
-            # Obtener datos con filtros
-            queryset = DatoArchivadoDinamico.objects.all()
+            # Obtener la tabla desde la URL
+            tabla = kwargs.get('tabla')
             
-            tabla = self.request.GET.get('tabla')
-            if tabla:
-                queryset = queryset.filter(tabla_origen=tabla)
+            if not tabla:
+                # Si no hay tabla, redirigir a la lista de tablas
+                context['datos'] = []
+                context['tabla_actual'] = None
+                return context
             
+            # Obtener datos de la tabla específica
+            queryset = DatoArchivadoDinamico.objects.filter(tabla_origen=tabla)
+            
+            # Filtro de búsqueda
             search = self.request.GET.get('search')
             if search:
                 queryset = queryset.filter(nombre_registro__icontains=search)
             
-            context['datos'] = queryset.order_by('-fecha_migracion')[:50]  # Limitar a 50
-            context['tablas_disponibles'] = DatoArchivadoDinamico.objects.values_list(
-                'tabla_origen', flat=True
-            ).distinct().order_by('tabla_origen')
+            context['datos'] = queryset.order_by('-fecha_migracion')
+            context['tabla_actual'] = tabla
+            context['total_registros'] = queryset.count()
             
         except Exception as e:
             context['datos'] = []
-            context['tablas_disponibles'] = []
+            context['tabla_actual'] = None
+            context['total_registros'] = 0
         
         return context
 
@@ -194,26 +276,333 @@ def estado_migracion_ajax(request):
     
     try:
         from .models import MigracionLog
+        from datetime import datetime, timedelta
+        from django.utils import timezone
         
-        ultima_migracion = MigracionLog.objects.filter(
+        # Buscar migración en progreso
+        migracion_en_progreso = MigracionLog.objects.filter(
             estado__in=['iniciada', 'en_progreso']
         ).first()
         
-        if ultima_migracion:
+        if migracion_en_progreso:
             data = {
                 'en_progreso': True,
-                'estado': ultima_migracion.estado,
-                'fecha_inicio': ultima_migracion.fecha_inicio.strftime('%d/%m/%Y %H:%M:%S'),
-                'total_migrados': ultima_migracion.usuarios_migrados,
-                'host_origen': ultima_migracion.host_origen,
-                'base_datos_origen': ultima_migracion.base_datos_origen,
+                'estado': migracion_en_progreso.estado,
+                'fecha_inicio': migracion_en_progreso.fecha_inicio.isoformat(),
+                'total_migrados': migracion_en_progreso.usuarios_migrados,
+                'tablas_inspeccionadas': migracion_en_progreso.tablas_inspeccionadas,
+                'tablas_con_datos': migracion_en_progreso.tablas_con_datos,
+                'tablas_vacias': migracion_en_progreso.tablas_vacias,
+                'host_origen': migracion_en_progreso.host_origen,
+                'base_datos_origen': migracion_en_progreso.base_datos_origen,
             }
         else:
-            data = {'en_progreso': False}
+            # Verificar si hay una migración completada recientemente (últimos 10 minutos)
+            hace_10_minutos = timezone.now() - timedelta(minutes=10)
+            migracion_reciente = MigracionLog.objects.filter(
+                fecha_inicio__gte=hace_10_minutos,
+                estado='completada'
+            ).first()
+            
+            if migracion_reciente:
+                data = {
+                    'en_progreso': False,
+                    'completada_recientemente': True,
+                    'estado': migracion_reciente.estado,
+                    'fecha_inicio': migracion_reciente.fecha_inicio.isoformat(),
+                    'fecha_fin': migracion_reciente.fecha_fin.isoformat() if migracion_reciente.fecha_fin else None,
+                    'total_migrados': migracion_reciente.usuarios_migrados,
+                    'tablas_inspeccionadas': migracion_reciente.tablas_inspeccionadas,
+                    'tablas_con_datos': migracion_reciente.tablas_con_datos,
+                    'tablas_vacias': migracion_reciente.tablas_vacias,
+                }
+            else:
+                data = {
+                    'en_progreso': False,
+                    'completada_recientemente': False
+                }
         
         return JsonResponse(data)
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+@login_required
+def exportar_excel(request, pk):
+    """Vista para exportar un dato archivado a Excel"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return render(request, 'datos_archivados/sin_permisos.html', status=403)
+    
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.shortcuts import get_object_or_404
+        from django.http import HttpResponse
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+        import json
+        from datetime import datetime
+        
+        # Obtener el dato archivado
+        dato = get_object_or_404(DatoArchivadoDinamico, pk=pk)
+        
+        # Crear workbook y worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = f"Dato_{dato.tabla_origen}_{dato.id_original}"
+        
+        # Estilos
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        info_font = Font(bold=True, color="000000")
+        info_fill = PatternFill(start_color="E7F3FF", end_color="E7F3FF", fill_type="solid")
+        
+        # Título principal
+        ws.merge_cells('A1:C1')
+        ws['A1'] = f"DETALLE DEL DATO ARCHIVADO"
+        ws['A1'].font = Font(bold=True, size=16)
+        ws['A1'].alignment = Alignment(horizontal='center')
+        
+        # Información general
+        row = 3
+        ws[f'A{row}'] = "INFORMACIÓN GENERAL"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws.merge_cells(f'A{row}:C{row}')
+        
+        row += 1
+        info_data = [
+            ("Tabla de Origen", dato.tabla_origen),
+            ("ID Original", dato.id_original),
+            ("Fecha de Migración", dato.fecha_migracion.strftime('%d/%m/%Y %H:%M:%S')),
+            ("Nombre del Registro", dato.obtener_nombre_legible()),
+        ]
+        
+        for campo, valor in info_data:
+            ws[f'A{row}'] = campo
+            ws[f'A{row}'].font = info_font
+            ws[f'A{row}'].fill = info_fill
+            ws[f'B{row}'] = str(valor)
+            row += 1
+        
+        # Datos del registro
+        row += 1
+        ws[f'A{row}'] = "DATOS DEL REGISTRO"
+        ws[f'A{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws.merge_cells(f'A{row}:C{row}')
+        
+        row += 1
+        ws[f'A{row}'] = "Campo"
+        ws[f'B{row}'] = "Valor"
+        ws[f'A{row}'].font = header_font
+        ws[f'B{row}'].font = header_font
+        ws[f'A{row}'].fill = header_fill
+        ws[f'B{row}'].fill = header_fill
+        
+        # Agregar datos del registro
+        for campo, valor in dato.datos_originales.items():
+            row += 1
+            ws[f'A{row}'] = str(campo)
+            ws[f'B{row}'] = str(valor) if valor is not None else "NULL"
+        
+        # Ajustar ancho de columnas
+        for column in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(column[0].column)
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Preparar respuesta HTTP
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+        filename = f"dato_archivado_{dato.tabla_origen}_{dato.id_original}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        # Guardar workbook en response
+        wb.save(response)
+        
+        return response
+        
+    except Exception as e:
+        messages.error(request, f'Error al exportar a Excel: {str(e)}')
+        return redirect('datos_archivados:dato_detail', pk=pk)
+
+@login_required
+def exportar_tabla_excel(request, tabla):
+    """Vista para exportar todos los datos de una tabla a Excel"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return render(request, 'datos_archivados/sin_permisos.html', status=403)
+    
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.http import HttpResponse
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from datetime import datetime
+        
+        # Obtener todos los datos de la tabla
+        datos = DatoArchivadoDinamico.objects.filter(tabla_origen=tabla).order_by('id_original')
+        
+        if not datos.exists():
+            messages.error(request, f'No hay datos para exportar de la tabla {tabla}.')
+            return redirect('datos_archivados:datos_list', tabla=tabla)
+        
+        # Crear workbook y worksheet
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = f"Tabla_{tabla}"
+        
+        # Estilos
+        header_font = Font(bold=True, color="FFFFFF", size=12)
+        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        title_font = Font(bold=True, size=16, color="000000")
+        info_font = Font(bold=True, size=11)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Título principal
+        ws.merge_cells('A1:F1')
+        ws['A1'] = f"DATOS ARCHIVADOS - TABLA: {tabla.upper()}"
+        ws['A1'].font = title_font
+        ws['A1'].alignment = Alignment(horizontal='center')
+        
+        # Información de la exportación
+        row = 3
+        ws[f'A{row}'] = f"Fecha de exportación: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}"
+        ws[f'A{row}'].font = info_font
+        row += 1
+        ws[f'A{row}'] = f"Total de registros: {datos.count()}"
+        ws[f'A{row}'].font = info_font
+        row += 1
+        ws[f'A{row}'] = f"Usuario: {request.user.username}"
+        ws[f'A{row}'].font = info_font
+        
+        # Obtener todos los campos únicos de todos los registros
+        todos_los_campos = set()
+        for dato in datos:
+            todos_los_campos.update(dato.datos_originales.keys())
+        
+        campos_ordenados = sorted(list(todos_los_campos))
+        
+        # Headers de la tabla
+        row = 6
+        ws[f'A{row}'] = "ID Sistema"
+        ws[f'B{row}'] = "ID Original"
+        ws[f'C{row}'] = "Fecha Migración"
+        
+        # Agregar headers de campos dinámicos
+        col_start = 4  # Columna D
+        for i, campo in enumerate(campos_ordenados):
+            col_letter = get_column_letter(col_start + i)
+            ws[f'{col_letter}{row}'] = campo
+        
+        # Aplicar estilo a headers
+        for col in range(1, len(campos_ordenados) + 4):
+            col_letter = get_column_letter(col)
+            cell = ws[f'{col_letter}{row}']
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal='center')
+        
+        # Agregar datos
+        for dato in datos:
+            row += 1
+            ws[f'A{row}'] = dato.pk
+            ws[f'B{row}'] = dato.id_original
+            ws[f'C{row}'] = dato.fecha_migracion.strftime('%d/%m/%Y %H:%M')
+            
+            # Agregar datos de campos dinámicos
+            for i, campo in enumerate(campos_ordenados):
+                col_letter = get_column_letter(col_start + i)
+                valor = dato.datos_originales.get(campo)
+                ws[f'{col_letter}{row}'] = str(valor) if valor is not None else "NULL"
+            
+            # Aplicar bordes a toda la fila
+            for col in range(1, len(campos_ordenados) + 4):
+                col_letter = get_column_letter(col)
+                ws[f'{col_letter}{row}'].border = border
+        
+        # Ajustar ancho de columnas
+        for column in ws.columns:
+            max_length = 0
+            column_letter = get_column_letter(column[0].column)
+            for cell in column:
+                try:
+                    if cell.value and len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 30)  # Máximo 30 caracteres
+            ws.column_dimensions[column_letter].width = max(adjusted_width, 10)  # Mínimo 10
+        
+        # Preparar respuesta HTTP
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        
+        filename = f"tabla_{tabla}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        
+        # Guardar workbook en response
+        wb.save(response)
+        
+        return response
+        
+    except Exception as e:
+        messages.error(request, f'Error al exportar tabla a Excel: {str(e)}')
+        return redirect('datos_archivados:datos_list', tabla=tabla)
+
+@login_required
+def eliminar_tablas(request):
+    """Vista para eliminar tablas seleccionadas y todos sus registros"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return render(request, 'datos_archivados/sin_permisos.html', status=403)
+    
+    if request.method == 'POST':
+        try:
+            from .models import DatoArchivadoDinamico
+            
+            # Obtener tablas a eliminar
+            tablas = request.POST.getlist('tablas')
+            
+            if not tablas:
+                messages.warning(request, 'No se seleccionaron tablas para eliminar.')
+                return redirect('datos_archivados:tablas_list')
+            
+            # Contar registros antes de eliminar
+            total_registros = 0
+            for tabla in tablas:
+                count = DatoArchivadoDinamico.objects.filter(tabla_origen=tabla).count()
+                total_registros += count
+            
+            # Eliminar registros de las tablas seleccionadas
+            eliminados = 0
+            for tabla in tablas:
+                eliminados += DatoArchivadoDinamico.objects.filter(tabla_origen=tabla).delete()[0]
+            
+            messages.success(
+                request, 
+                f'Se eliminaron {len(tablas)} tabla(s) con un total de {eliminados} registros.'
+            )
+            
+        except Exception as e:
+            messages.error(request, f'Error al eliminar tablas: {str(e)}')
+    
+    return redirect('datos_archivados:tablas_list')
 
 @login_required
 def debug_permisos(request):

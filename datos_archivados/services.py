@@ -67,54 +67,62 @@ class InspectorBaseDatos:
     
     def mapear_tipo_campo(self, tipo_mysql, es_nullable, es_clave_primaria, longitud_maxima=None):
         """Mapea tipos de datos MySQL a campos Django"""
-        tipo_mysql = tipo_mysql.lower()
-        
-        # Mapeo básico de tipos
-        if 'int' in tipo_mysql:
-            if es_clave_primaria:
-                return models.AutoField(primary_key=True)
-            elif 'bigint' in tipo_mysql:
-                return models.BigIntegerField(null=es_nullable, blank=es_nullable)
+        try:
+            tipo_mysql = str(tipo_mysql).lower()
+            
+            # Mapeo básico de tipos
+            if 'int' in tipo_mysql:
+                if es_clave_primaria:
+                    return models.AutoField(primary_key=True)
+                elif 'bigint' in tipo_mysql:
+                    return models.BigIntegerField(null=es_nullable, blank=es_nullable)
+                else:
+                    return models.IntegerField(null=es_nullable, blank=es_nullable)
+            
+            elif 'varchar' in tipo_mysql or 'char' in tipo_mysql:
+                max_length = longitud_maxima or 255
+                # Limitar longitud máxima para evitar errores
+                if max_length > 500:
+                    return models.TextField(null=es_nullable, blank=es_nullable)
+                return models.CharField(max_length=max_length, null=es_nullable, blank=es_nullable)
+            
+            elif 'text' in tipo_mysql or 'longtext' in tipo_mysql or 'mediumtext' in tipo_mysql:
+                return models.TextField(null=es_nullable, blank=es_nullable)
+            
+            elif 'decimal' in tipo_mysql or 'numeric' in tipo_mysql:
+                return models.DecimalField(max_digits=10, decimal_places=2, null=es_nullable, blank=es_nullable)
+            
+            elif 'float' in tipo_mysql or 'double' in tipo_mysql:
+                return models.FloatField(null=es_nullable, blank=es_nullable)
+            
+            elif 'date' in tipo_mysql and 'datetime' not in tipo_mysql:
+                return models.DateField(null=es_nullable, blank=es_nullable)
+            
+            elif 'datetime' in tipo_mysql or 'timestamp' in tipo_mysql:
+                return models.DateTimeField(null=es_nullable, blank=es_nullable)
+            
+            elif 'time' in tipo_mysql:
+                return models.TimeField(null=es_nullable, blank=es_nullable)
+            
+            elif 'bool' in tipo_mysql or 'tinyint(1)' in tipo_mysql:
+                return models.BooleanField(default=False, null=es_nullable)
+            
+            elif 'tinyint' in tipo_mysql:
+                return models.SmallIntegerField(null=es_nullable, blank=es_nullable)
+            
+            elif 'json' in tipo_mysql:
+                return models.JSONField(null=es_nullable, blank=es_nullable)
+            
+            elif 'blob' in tipo_mysql or 'binary' in tipo_mysql:
+                return models.BinaryField(null=es_nullable, blank=es_nullable)
+            
             else:
-                return models.IntegerField(null=es_nullable, blank=es_nullable)
-        
-        elif 'varchar' in tipo_mysql or 'char' in tipo_mysql:
-            max_length = longitud_maxima or 255
-            if tipo_mysql.startswith('char'):
-                # Extraer longitud del tipo char(n)
-                import re
-                match = re.search(r'\((\d+)\)', tipo_mysql)
-                if match:
-                    max_length = int(match.group(1))
-            return models.CharField(max_length=max_length, null=es_nullable, blank=es_nullable)
-        
-        elif 'text' in tipo_mysql:
-            return models.TextField(null=es_nullable, blank=es_nullable)
-        
-        elif 'decimal' in tipo_mysql or 'numeric' in tipo_mysql:
-            return models.DecimalField(max_digits=10, decimal_places=2, null=es_nullable, blank=es_nullable)
-        
-        elif 'float' in tipo_mysql or 'double' in tipo_mysql:
-            return models.FloatField(null=es_nullable, blank=es_nullable)
-        
-        elif 'date' in tipo_mysql and 'datetime' not in tipo_mysql:
-            return models.DateField(null=es_nullable, blank=es_nullable)
-        
-        elif 'datetime' in tipo_mysql or 'timestamp' in tipo_mysql:
-            return models.DateTimeField(null=es_nullable, blank=es_nullable)
-        
-        elif 'time' in tipo_mysql:
-            return models.TimeField(null=es_nullable, blank=es_nullable)
-        
-        elif 'bool' in tipo_mysql or 'tinyint(1)' in tipo_mysql:
-            return models.BooleanField(default=False)
-        
-        elif 'json' in tipo_mysql:
-            return models.JSONField(null=es_nullable, blank=es_nullable)
-        
-        else:
-            # Tipo por defecto
-            return models.CharField(max_length=255, null=es_nullable, blank=es_nullable)
+                # Tipo por defecto - usar TextField para tipos desconocidos
+                return models.TextField(null=es_nullable, blank=es_nullable)
+                
+        except Exception as e:
+            logger.warning(f"Error mapeando tipo {tipo_mysql}: {e}. Usando TextField por defecto.")
+            return models.TextField(null=True, blank=True)
     
     def crear_modelo_dinamico(self, estructura_tabla):
         """Crea un modelo Django dinámico basado en la estructura de la tabla"""
@@ -162,6 +170,9 @@ class InspectorBaseDatos:
             'verbose_name_plural': f'{nombre_modelo}s'
         })
         
+        # Agregar el módulo requerido para Django
+        campos['__module__'] = 'datos_archivados.models'
+        
         # Crear el modelo dinámico
         modelo_dinamico = type(nombre_modelo, (models.Model,), campos)
         
@@ -170,16 +181,31 @@ class InspectorBaseDatos:
     
     def convertir_nombre_modelo(self, nombre_tabla):
         """Convierte el nombre de tabla a un nombre de modelo válido"""
-        # Remover prefijos comunes
-        nombre = nombre_tabla
-        if nombre.startswith('principal_'):
-            nombre = nombre[10:]  # Remover 'principal_'
-        elif nombre.startswith('auth_'):
-            nombre = nombre[5:]   # Remover 'auth_'
+        # Remover prefijos comunes y limpiar el nombre
+        nombre = nombre_tabla.lower()
         
-        # Convertir a CamelCase
-        partes = nombre.split('_')
-        return ''.join(palabra.capitalize() for palabra in partes) + 'Archivado'
+        # Remover prefijos conocidos
+        prefijos_a_remover = ['principal_', 'auth_', 'django_', 'blog_', 'docencia_', 'sapereAude_']
+        for prefijo in prefijos_a_remover:
+            if nombre.startswith(prefijo.lower()):
+                nombre = nombre[len(prefijo):]
+                break
+        
+        # Limpiar caracteres especiales y convertir a CamelCase
+        nombre = nombre.replace('-', '_').replace(' ', '_')
+        partes = [parte for parte in nombre.split('_') if parte]  # Filtrar partes vacías
+        
+        # Crear nombre válido para modelo Django
+        nombre_modelo = ''.join(palabra.capitalize() for palabra in partes)
+        
+        # Asegurar que empiece con letra mayúscula y sea válido
+        if not nombre_modelo:
+            nombre_modelo = 'TablaArchivada'
+        elif not nombre_modelo[0].isupper():
+            nombre_modelo = nombre_modelo.capitalize()
+        
+        # Agregar sufijo para evitar conflictos
+        return nombre_modelo + 'Archivado'
     
     def inspeccionar_base_datos_completa(self):
         """Inspecciona toda la base de datos y crea modelos dinámicos"""
@@ -202,7 +228,9 @@ class InspectorBaseDatos:
                 modelos_creados[tabla] = modelo
                 logger.info(f"Modelo dinámico creado para tabla: {tabla}")
             except Exception as e:
-                logger.error(f"Error creando modelo para tabla {tabla}: {e}")
+                logger.error(f"Error creando modelo para tabla {tabla}: {str(e)}")
+                # Continuar con las demás tablas aunque una falle
+                continue
         
         return modelos_creados
 
@@ -727,19 +755,42 @@ class MigracionService:
             # Migrar datos usando los modelos dinámicos
             total_registros_migrados = 0
             
+            tablas_con_datos = 0
+            tablas_vacias = 0
+            registros_nuevos_migrados = 0
+            
             for nombre_tabla, modelo_dinamico in modelos_dinamicos.items():
                 try:
                     logger.info(f"Migrando datos de la tabla: {nombre_tabla}")
-                    registros_migrados = self.migrar_tabla_dinamica(nombre_tabla, modelo_dinamico)
-                    total_registros_migrados += registros_migrados
-                    logger.info(f"Migrados {registros_migrados} registros de {nombre_tabla}")
+                    registros_en_origen = self.migrar_tabla_dinamica(nombre_tabla, modelo_dinamico)
+                    
+                    # Contar si la tabla tiene datos en el origen
+                    if registros_en_origen > 0:
+                        tablas_con_datos += 1
+                        logger.info(f"✓ Tabla {nombre_tabla} tiene {registros_en_origen} registros")
+                    else:
+                        tablas_vacias += 1
+                        logger.info(f"○ Tabla {nombre_tabla} está vacía")
+                        
                 except Exception as e:
                     logger.error(f"Error migrando tabla {nombre_tabla}: {e}")
+                    tablas_vacias += 1  # Contar como vacía si hay error
                     continue
             
+            # Contar registros realmente migrados (nuevos)
+            from .models import DatoArchivadoDinamico
+            registros_nuevos_migrados = DatoArchivadoDinamico.objects.filter(
+                fecha_migracion__gte=self.migration_log.fecha_inicio
+            ).count()
+            
             # Actualizar log con totales
-            self.migration_log.usuarios_migrados = total_registros_migrados
+            self.migration_log.usuarios_migrados = registros_nuevos_migrados
+            self.migration_log.tablas_inspeccionadas = len(modelos_dinamicos)
+            self.migration_log.tablas_con_datos = tablas_con_datos
+            self.migration_log.tablas_vacias = tablas_vacias
             self.migration_log.save()
+            
+            logger.info(f"Resumen: {len(modelos_dinamicos)} tablas inspeccionadas, {tablas_con_datos} con datos, {tablas_vacias} vacías")
             
             # Finalizar migración exitosa
             self.finalizar_migracion('completada')
@@ -766,6 +817,8 @@ class MigracionService:
             cursor.execute(query)
             registros = cursor.fetchall()
             
+            # Contar registros en la tabla origen (no solo los nuevos migrados)
+            total_registros_origen = len(registros)
             migrados = 0
             
             for registro in registros:
@@ -778,7 +831,9 @@ class MigracionService:
                     logger.error(f"Error migrando registro {registro.get('id', 'N/A')} de {nombre_tabla}: {e}")
                     continue
             
-            return migrados
+            # Retornar el total de registros en origen (para contar tablas con datos)
+            # aunque no se hayan migrado nuevos registros en esta ejecución
+            return total_registros_origen
             
         except Exception as e:
             logger.error(f"Error migrando tabla {nombre_tabla}: {e}")
