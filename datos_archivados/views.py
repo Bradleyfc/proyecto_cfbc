@@ -286,6 +286,10 @@ def estado_migracion_ajax(request):
         def safe_str(value):
             return value if value is not None else ''
         
+        # Función helper para obtener atributos que pueden no existir
+        def safe_getattr(obj, attr, default=0):
+            return getattr(obj, attr, default) if hasattr(obj, attr) else default
+        
         # Buscar migración en progreso
         migracion_en_progreso = MigracionLog.objects.filter(
             estado__in=['iniciada', 'en_progreso']
@@ -308,11 +312,11 @@ def estado_migracion_ajax(request):
                 'estado': safe_str(migracion_en_progreso.estado) or 'iniciada',
                 'fecha_inicio': migracion_en_progreso.fecha_inicio.isoformat() if migracion_en_progreso.fecha_inicio else None,
                 'total_migrados': total_migrados,
-                'tablas_inspeccionadas': safe_int(migracion_en_progreso.tablas_inspeccionadas),
-                'tablas_con_datos': safe_int(migracion_en_progreso.tablas_con_datos),
-                'tablas_vacias': safe_int(migracion_en_progreso.tablas_vacias),
-                'host_origen': safe_str(migracion_en_progreso.host_origen) or 'N/A',
-                'base_datos_origen': safe_str(migracion_en_progreso.base_datos_origen) or 'N/A',
+                'tablas_inspeccionadas': safe_int(safe_getattr(migracion_en_progreso, 'tablas_inspeccionadas', 0)),
+                'tablas_con_datos': safe_int(safe_getattr(migracion_en_progreso, 'tablas_con_datos', 0)),
+                'tablas_vacias': safe_int(safe_getattr(migracion_en_progreso, 'tablas_vacias', 0)),
+                'host_origen': safe_str(safe_getattr(migracion_en_progreso, 'host_origen', '')) or 'N/A',
+                'base_datos_origen': safe_str(safe_getattr(migracion_en_progreso, 'base_datos_origen', '')) or 'N/A',
             }
         else:
             # Verificar si hay una migración completada recientemente (últimos 10 minutos)
@@ -341,10 +345,10 @@ def estado_migracion_ajax(request):
                     'fecha_inicio': migracion_reciente.fecha_inicio.isoformat() if migracion_reciente.fecha_inicio else None,
                     'fecha_fin': migracion_reciente.fecha_fin.isoformat() if migracion_reciente.fecha_fin else None,
                     'total_migrados': total_migrados,
-                    'tablas_inspeccionadas': safe_int(migracion_reciente.tablas_inspeccionadas),
-                    'tablas_con_datos': safe_int(migracion_reciente.tablas_con_datos),
-                    'tablas_vacias': safe_int(migracion_reciente.tablas_vacias),
-                    'host_origen': safe_str(migracion_reciente.host_origen) or 'N/A',
+                    'tablas_inspeccionadas': safe_int(safe_getattr(migracion_reciente, 'tablas_inspeccionadas', 0)),
+                    'tablas_con_datos': safe_int(safe_getattr(migracion_reciente, 'tablas_con_datos', 0)),
+                    'tablas_vacias': safe_int(safe_getattr(migracion_reciente, 'tablas_vacias', 0)),
+                    'host_origen': safe_str(safe_getattr(migracion_reciente, 'host_origen', '')) or 'N/A',
                 }
             else:
                 data = {
