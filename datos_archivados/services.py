@@ -881,6 +881,8 @@ class MigracionService:
         """
         Convierte los datos del registro a formato JSON, manejando tipos especiales
         """
+        from datetime import timedelta
+        
         datos_convertidos = {}
         
         for clave, valor in datos.items():
@@ -888,6 +890,12 @@ class MigracionService:
                 datos_convertidos[clave] = None
             elif isinstance(valor, (datetime, date)):
                 datos_convertidos[clave] = valor.isoformat()
+            elif isinstance(valor, timedelta):
+                # Convertir timedelta a string en formato legible
+                total_seconds = int(valor.total_seconds())
+                hours, remainder = divmod(total_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                datos_convertidos[clave] = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             elif isinstance(valor, Decimal):
                 datos_convertidos[clave] = float(valor)
             elif isinstance(valor, bytes):
@@ -897,7 +905,14 @@ class MigracionService:
                 except:
                     datos_convertidos[clave] = str(valor)
             else:
-                datos_convertidos[clave] = valor
+                # Para cualquier otro tipo que no sea JSON serializable, convertir a string
+                try:
+                    # Intentar serializar para verificar si es JSON serializable
+                    json.dumps(valor)
+                    datos_convertidos[clave] = valor
+                except (TypeError, ValueError):
+                    # Si no es serializable, convertir a string
+                    datos_convertidos[clave] = str(valor)
         
         return datos_convertidos
     
