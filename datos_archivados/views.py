@@ -205,22 +205,64 @@ class TablasArchivadosListView(TemplateView):
         
         try:
             from .models import DatoArchivadoDinamico
-            from django.db.models import Count, Max
+            from django.db.models import Count, Max, Q
             
-            # Obtener estadísticas por tabla
-            tablas_stats = DatoArchivadoDinamico.objects.values('tabla_origen').annotate(
+            # Obtener parámetros de búsqueda
+            search_query = self.request.GET.get('search', '').strip()
+            search_type = self.request.GET.get('search_type', 'tabla')
+            
+            # Query base
+            queryset = DatoArchivadoDinamico.objects.all()
+            
+            # Aplicar filtros de búsqueda
+            if search_query:
+                if search_type == 'tabla':
+                    # Buscar por nombre de tabla
+                    queryset = queryset.filter(tabla_origen__icontains=search_query)
+                elif search_type == 'contenido':
+                    # Buscar en el contenido de los datos (JSON)
+                    queryset = queryset.filter(
+                        Q(datos_originales__icontains=search_query) |
+                        Q(nombre_registro__icontains=search_query)
+                    )
+                elif search_type == 'global':
+                    # Búsqueda global (tabla + contenido)
+                    queryset = queryset.filter(
+                        Q(tabla_origen__icontains=search_query) |
+                        Q(datos_originales__icontains=search_query) |
+                        Q(nombre_registro__icontains=search_query)
+                    )
+            
+            # Obtener estadísticas por tabla con filtros aplicados
+            tablas_stats = queryset.values('tabla_origen').annotate(
                 total_registros=Count('id'),
                 ultima_migracion=Max('fecha_migracion')
             ).order_by('tabla_origen')
             
-            context['tablas_stats'] = tablas_stats
-            context['total_tablas'] = tablas_stats.count()
-            context['total_registros'] = DatoArchivadoDinamico.objects.count()
+            # Estadísticas generales
+            total_registros_filtrados = queryset.count()
+            total_registros_totales = DatoArchivadoDinamico.objects.count()
+            
+            context.update({
+                'tablas_stats': tablas_stats,
+                'total_tablas': tablas_stats.count(),
+                'total_registros': total_registros_totales,
+                'total_registros_filtrados': total_registros_filtrados,
+                'search_query': search_query,
+                'search_type': search_type,
+                'is_filtered': bool(search_query),
+            })
             
         except Exception as e:
-            context['tablas_stats'] = []
-            context['total_tablas'] = 0
-            context['total_registros'] = 0
+            context.update({
+                'tablas_stats': [],
+                'total_tablas': 0,
+                'total_registros': 0,
+                'total_registros_filtrados': 0,
+                'search_query': '',
+                'search_type': 'tabla',
+                'is_filtered': False,
+            })
         
         return context
 
@@ -257,9 +299,46 @@ class DatosArchivadosListView(TemplateView):
             if search:
                 queryset = queryset.filter(nombre_registro__icontains=search)
             
-            context['datos'] = queryset.order_by('-fecha_migracion')
-            context['tabla_actual'] = tabla
-            context['total_registros'] = queryset.count()
+            # Ordenamiento
+            order_by = self.request.GET.get('order_by', 'fecha_migracion')
+            order_direction = self.request.GET.get('order_direction', 'desc')
+            
+            # Validar campos de ordenamiento
+            valid_order_fields = {
+                'fecha_migracion': 'fecha_migracion',
+                'id_original': 'id_original',
+                'nombre': 'nombre_registro',
+                'tabla': 'tabla_origen'
+            }
+            
+            if order_by in valid_order_fields:
+                order_field = valid_order_fields[order_by]
+                if order_direction == 'desc':
+                    order_field = f'-{order_field}'
+                queryset = queryset.order_by(order_field)
+            else:
+                # Ordenamiento por defecto
+                queryset = queryset.order_by('-fecha_migracion')
+            
+            # Para ordenamiento por nombre, necesitamos ordenar después de obtener los datos
+            # porque nombre_registro puede ser None y necesitamos usar obtener_nombre_legible()
+            if order_by == 'nombre':
+                datos_list = list(queryset)
+                datos_list.sort(
+                    key=lambda x: (x.obtener_nombre_legible() or '').lower(),
+                    reverse=(order_direction == 'desc')
+                )
+                context['datos'] = datos_list
+            else:
+                context['datos'] = queryset
+            
+            context.update({
+                'tabla_actual': tabla,
+                'total_registros': queryset.count(),
+                'search_query': search or '',
+                'order_by': order_by,
+                'order_direction': order_direction,
+            })
             
         except Exception as e:
             context['datos'] = []
@@ -653,6 +732,253 @@ def eliminar_tablas(request):
             messages.error(request, f'Error al eliminar tablas: {str(e)}')
     
     return redirect('datos_archivados:tablas_list')
+
+def reclamar_usuario_archivado(request):
+    """Vista para que usuarios reclamen su cuenta archivada"""
+    from .forms import ReclamarUsuarioArchivadoForm
+    from django.contrib.auth import login
+    
+    if request.method == 'POST':
+        form = ReclamarUsuarioArchivadoForm(request.POST)
+        if form.is_valid():
+            try:
+                user = form.save()
+                login(request, user)
+                messages.success(
+                    request, 
+                    f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
+                    'Su cuenta ha sido reactivada exitosamente.'
+                )
+                return redirect('principal:login_redirect')
+            except Exception as e:
+                messages.error(request, f'Error al reactivar la cuenta: {str(e)}')
+    else:
+        form = ReclamarUsuarioArchivadoForm()
+    
+    return render(request, 'datos_archivados/reclamar_usuario.html', {'form': form})
+
+def buscar_usuario_archivado(request):
+    """Vista para buscar usuarios archivados disponibles para reclamar"""
+    from .forms import BuscarUsuarioArchivadoForm
+    
+    form = BuscarUsuarioArchivadoForm()
+    usuarios_encontrados = []
+    
+    if request.method == 'GET' and 'busqueda' in request.GET:
+        form = BuscarUsuarioArchivadoForm(request.GET)
+        if form.is_valid():
+            usuarios_encontrados = form.buscar_usuarios().filter(
+                usuario_actual__isnull=True  # Solo usuarios no reclamados
+            )[:20]  # Limitar resultados
+    
+    context = {
+        'form': form,
+        'usuarios_encontrados': usuarios_encontrados,
+    }
+    
+    return render(request, 'datos_archivados/buscar_usuario.html', context)
+
+@login_required
+def buscar_datos_ajax(request):
+    """Vista AJAX para búsqueda en tiempo real de datos archivados"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return JsonResponse({'error': 'Sin permisos'}, status=403)
+    
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.db.models import Q, Count
+        
+        search_query = request.GET.get('q', '').strip()
+        search_type = request.GET.get('type', 'global')
+        limit = int(request.GET.get('limit', 10))
+        
+        if not search_query:
+            return JsonResponse({
+                'results': [],
+                'total': 0,
+                'query': search_query
+            })
+        
+        # Construir query de búsqueda
+        queryset = DatoArchivadoDinamico.objects.all()
+        
+        if search_type == 'tabla':
+            queryset = queryset.filter(tabla_origen__icontains=search_query)
+        elif search_type == 'contenido':
+            queryset = queryset.filter(
+                Q(datos_originales__icontains=search_query) |
+                Q(nombre_registro__icontains=search_query)
+            )
+        else:  # global
+            queryset = queryset.filter(
+                Q(tabla_origen__icontains=search_query) |
+                Q(datos_originales__icontains=search_query) |
+                Q(nombre_registro__icontains=search_query)
+            )
+        
+        # Obtener resultados agrupados por tabla
+        tablas_resultados = queryset.values('tabla_origen').annotate(
+            total=Count('id')
+        ).order_by('-total', 'tabla_origen')[:limit]
+        
+        # Obtener algunos registros de ejemplo para cada tabla
+        resultados = []
+        for tabla in tablas_resultados:
+            tabla_nombre = tabla['tabla_origen']
+            total_registros = tabla['total']
+            
+            # Obtener algunos registros de ejemplo
+            ejemplos = queryset.filter(tabla_origen=tabla_nombre)[:3]
+            ejemplos_data = []
+            
+            for ejemplo in ejemplos:
+                # Extraer información relevante del registro
+                datos = ejemplo.datos_originales
+                nombre = ejemplo.obtener_nombre_legible()
+                
+                # Buscar campos que contengan el término de búsqueda
+                campos_coincidentes = []
+                if search_type in ['contenido', 'global']:
+                    for campo, valor in datos.items():
+                        if search_query.lower() in str(valor).lower():
+                            campos_coincidentes.append({
+                                'campo': campo,
+                                'valor': str(valor)[:100] + ('...' if len(str(valor)) > 100 else '')
+                            })
+                
+                ejemplos_data.append({
+                    'id': ejemplo.id,
+                    'nombre': nombre,
+                    'campos_coincidentes': campos_coincidentes[:3]  # Máximo 3 campos
+                })
+            
+            resultados.append({
+                'tabla': tabla_nombre,
+                'total_registros': total_registros,
+                'ejemplos': ejemplos_data
+            })
+        
+        return JsonResponse({
+            'results': resultados,
+            'total': queryset.count(),
+            'query': search_query,
+            'search_type': search_type
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': f'Error en búsqueda: {str(e)}',
+            'results': [],
+            'total': 0
+        })
+
+@login_required
+def buscar_en_tabla_ajax(request, tabla):
+    """Vista AJAX para búsqueda en tiempo real dentro de una tabla específica"""
+    if not tiene_permisos_datos_archivados(request.user):
+        return JsonResponse({'error': 'Sin permisos'}, status=403)
+    
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.db.models import Q
+        
+        search_query = request.GET.get('q', '').strip()
+        order_by = request.GET.get('order_by', 'fecha_migracion')
+        order_direction = request.GET.get('order_direction', 'desc')
+        limit = int(request.GET.get('limit', 20))
+        
+        # Query base para la tabla específica
+        queryset = DatoArchivadoDinamico.objects.filter(tabla_origen=tabla)
+        
+        # Aplicar filtro de búsqueda si existe
+        if search_query:
+            queryset = queryset.filter(
+                Q(datos_originales__icontains=search_query) |
+                Q(nombre_registro__icontains=search_query)
+            )
+        
+        # Aplicar ordenamiento
+        valid_order_fields = {
+            'fecha_migracion': 'fecha_migracion',
+            'id_original': 'id_original',
+            'nombre': 'nombre_registro',
+            'tabla': 'tabla_origen'
+        }
+        
+        if order_by in valid_order_fields:
+            order_field = valid_order_fields[order_by]
+            if order_direction == 'desc':
+                order_field = f'-{order_field}'
+            queryset = queryset.order_by(order_field)
+        
+        # Obtener resultados limitados
+        resultados = queryset[:limit]
+        
+        # Para ordenamiento por nombre, necesitamos ordenar después
+        if order_by == 'nombre':
+            resultados_list = list(resultados)
+            resultados_list.sort(
+                key=lambda x: (x.obtener_nombre_legible() or '').lower(),
+                reverse=(order_direction == 'desc')
+            )
+            resultados = resultados_list
+        
+        # Preparar datos para JSON
+        datos_json = []
+        for dato in resultados:
+            # Resaltar términos de búsqueda en el nombre
+            nombre = dato.obtener_nombre_legible()
+            if search_query and nombre:
+                # Simple highlighting (se puede mejorar)
+                nombre_resaltado = nombre.replace(
+                    search_query, 
+                    f'<mark>{search_query}</mark>'
+                )
+            else:
+                nombre_resaltado = nombre
+            
+            # Buscar campos que coincidan con la búsqueda
+            campos_coincidentes = []
+            if search_query:
+                for campo, valor in dato.datos_originales.items():
+                    if search_query.lower() in str(valor).lower():
+                        valor_str = str(valor)
+                        if len(valor_str) > 100:
+                            valor_str = valor_str[:100] + '...'
+                        campos_coincidentes.append({
+                            'campo': campo,
+                            'valor': valor_str
+                        })
+                        if len(campos_coincidentes) >= 3:  # Máximo 3 campos
+                            break
+            
+            datos_json.append({
+                'id': dato.pk,
+                'id_original': dato.id_original,
+                'nombre': nombre,
+                'nombre_resaltado': nombre_resaltado,
+                'fecha_migracion': dato.fecha_migracion.strftime('%d/%m/%Y %H:%M'),
+                'campos_coincidentes': campos_coincidentes,
+                'url_detalle': f'/datos-archivados/datos/{dato.pk}/'
+            })
+        
+        return JsonResponse({
+            'success': True,
+            'resultados': datos_json,
+            'total_encontrados': queryset.count(),
+            'total_mostrados': len(datos_json),
+            'query': search_query,
+            'tabla': tabla,
+            'order_by': order_by,
+            'order_direction': order_direction
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': f'Error en búsqueda: {str(e)}',
+            'resultados': []
+        })
 
 @login_required
 def debug_permisos(request):

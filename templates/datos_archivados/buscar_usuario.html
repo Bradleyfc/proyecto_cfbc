@@ -1,0 +1,119 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+
+{% block title %}Buscar Usuario Archivado{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h4 class="mb-0">
+                        <i class="fas fa-search"></i>
+                        Buscar Usuario Archivado
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Busca tu cuenta anterior</strong><br>
+                        Ingresa tu nombre de usuario, email o nombre completo para encontrar tu cuenta archivada.
+                    </div>
+
+                    <form method="get" class="mb-4">
+                        <div class="row">
+                            <div class="col-md-8">
+                                {{ form.busqueda|as_crispy_field }}
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="fas fa-search"></i>
+                                    Buscar
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    {% if usuarios_encontrados %}
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i>
+                            Se encontraron {{ usuarios_encontrados|length }} usuario(s) disponible(s) para reclamar.
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th>Usuario</th>
+                                        <th>Nombre Completo</th>
+                                        <th>Email</th>
+                                        <th>Grupo</th>
+                                        <th>Fecha Registro</th>
+                                        <th>Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usuario in usuarios_encontrados %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ usuario.username }}</strong>
+                                            {% if usuario.carnet %}
+                                                <br><small class="text-muted">CI: {{ usuario.carnet }}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ usuario.first_name }} {{ usuario.last_name }}</td>
+                                        <td>{{ usuario.email|default:"No especificado" }}</td>
+                                        <td>
+                                            {% if usuario.grupo %}
+                                                <span class="badge bg-secondary">{{ usuario.grupo }}</span>
+                                            {% else %}
+                                                <span class="text-muted">Sin grupo</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ usuario.date_joined|date:"d/m/Y" }}</td>
+                                        <td>
+                                            <a href="{% url 'datos_archivados:reclamar_usuario' %}" 
+                                               class="btn btn-sm btn-success"
+                                               title="Reclamar esta cuenta">
+                                                <i class="fas fa-user-check"></i>
+                                                Reclamar
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {% if usuarios_encontrados|length == 20 %}
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                Se muestran solo los primeros 20 resultados. Refina tu búsqueda para encontrar más usuarios específicos.
+                            </div>
+                        {% endif %}
+
+                    {% elif form.is_bound %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            No se encontraron usuarios archivados con ese término de búsqueda.
+                            <br><small>Intenta con tu nombre de usuario completo, email o nombre real.</small>
+                        </div>
+                    {% endif %}
+
+                    <div class="text-center mt-4">
+                        <a href="{% url 'datos_archivados:reclamar_usuario' %}" class="btn btn-outline-primary me-2">
+                            <i class="fas fa-user-check"></i>
+                            Reclamar Cuenta Directamente
+                        </a>
+                        <a href="{% url 'principal:registro' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-user-plus"></i>
+                            Crear Cuenta Nueva
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

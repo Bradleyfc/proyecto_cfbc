@@ -19,6 +19,14 @@ urlpatterns = [
     path('migracion/configurar/', views.configurar_migracion_view, name='configurar_migracion'),
     path('migracion/estado/', views.estado_migracion_ajax, name='estado_migracion'),
     
+    # Usuarios archivados
+    path('reclamar-usuario/', views.reclamar_usuario_archivado, name='reclamar_usuario'),
+    path('buscar-usuario/', views.buscar_usuario_archivado, name='buscar_usuario'),
+    
+    # Búsqueda AJAX
+    path('buscar-ajax/', views.buscar_datos_ajax, name='buscar_datos_ajax'),
+    path('tablas/<str:tabla>/buscar-ajax/', views.buscar_en_tabla_ajax, name='buscar_en_tabla_ajax'),
+    
     # Debug
     path('debug/', views.debug_permisos, name='debug_permisos'),
 ]

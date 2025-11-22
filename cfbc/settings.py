@@ -30,7 +30,7 @@ SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-c-lkpmdz%270@0-89xsztu0ugd
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['testserver', 'localhost', '127.0.0.1']
 
 
 # Application definition
@@ -152,6 +152,12 @@ LOGOUT_REDIRECT_URL = 'principal:home'
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 
 CRISPY_TEMPLATE_PACK = "bootstrap5"
+
+# Backends de autenticación
+AUTHENTICATION_BACKENDS = [
+    'datos_archivados.backends.UsuarioArchivadoBackend',  # Backend personalizado para usuarios archivados
+    'django.contrib.auth.backends.ModelBackend',  # Backend por defecto de Django
+]
 
 
 # Email configuration

@@ -14,6 +14,77 @@
                     </h3>
                 </div>
                 <div class="card-body">
+                    <!-- Barra de búsqueda -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card bg-light">
+                                <div class="card-body py-3">
+                                    <form method="GET" id="searchForm" class="row g-3 align-items-end">
+                                        <div class="col-md-5">
+                                            <label for="searchInput" class="form-label">
+                                                <i class="bi bi-search"></i> Buscar en datos archivados
+                                            </label>
+                                            <div class="input-group">
+                                                <input type="text" 
+                                                       class="form-control" 
+                                                       id="searchInput" 
+                                                       name="search" 
+                                                       value="{{ search_query }}"
+                                                       placeholder="Ingrese término de búsqueda..."
+                                                       autocomplete="off">
+                                                <button class="btn btn-outline-secondary" type="button" id="clearSearch" title="Limpiar búsqueda">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="searchType" class="form-label">Tipo de búsqueda</label>
+                                            <select class="form-select" id="searchType" name="search_type">
+                                                <option value="tabla" {% if search_type == 'tabla' %}selected{% endif %}>
+                                                    Solo nombres de tablas
+                                                </option>
+                                                <option value="contenido" {% if search_type == 'contenido' %}selected{% endif %}>
+                                                    Solo contenido de registros
+                                                </option>
+                                                <option value="global" {% if search_type == 'global' %}selected{% endif %}>
+                                                    Búsqueda global (todo)
+                                                </option>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <button type="submit" class="btn btn-primary w-100">
+                                                <i class="bi bi-search"></i> Buscar
+                                            </button>
+                                        </div>
+                                        <div class="col-md-2">
+                                            <button type="button" class="btn btn-success w-100" id="btnBusquedaRapida">
+                                                <i class="bi bi-lightning"></i> Búsqueda Rápida
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resultados de búsqueda rápida -->
+                    <div id="quickSearchResults" class="mb-4" style="display: none;">
+                        <div class="card border-success">
+                            <div class="card-header bg-success text-white">
+                                <h6 class="mb-0">
+                                    <i class="bi bi-lightning-fill"></i> Resultados de Búsqueda Rápida
+                                    <button type="button" class="btn btn-sm btn-outline-light float-end" id="closeQuickSearch">
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                </h6>
+                            </div>
+                            <div class="card-body" id="quickSearchContent">
+                                <!-- Contenido dinámico -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Barra de acciones y estadísticas -->
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <a href="{% url 'datos_archivados:dashboard' %}" class="btn btn-primary">
@@ -27,12 +98,34 @@
                             </button>
                         </div>
                         <div class="col-md-6 text-end">
-                            <span class="badge bg-info fs-6">
-                                <i class="bi bi-table"></i> {{ total_tablas }} tablas | 
-                                <i class="bi bi-database"></i> {{ total_registros }} registros totales
-                            </span>
+                            {% if is_filtered %}
+                                <span class="badge bg-warning fs-6 me-2">
+                                    <i class="bi bi-funnel"></i> Filtrado: {{ total_tablas }} tablas | {{ total_registros_filtrados }} registros
+                                </span>
+                                <a href="{% url 'datos_archivados:tablas_list' %}" class="btn btn-sm btn-outline-secondary">
+                                    <i class="bi bi-x-circle"></i> Limpiar filtros
+                                </a>
+                            {% else %}
+                                <span class="badge bg-info fs-6">
+                                    <i class="bi bi-table"></i> {{ total_tablas }} tablas | 
+                                    <i class="bi bi-database"></i> {{ total_registros }} registros totales
+                                </span>
+                            {% endif %}
                         </div>
                     </div>
+
+                    <!-- Mensaje de filtros activos -->
+                    {% if is_filtered %}
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>Filtros activos:</strong> 
+                        Búsqueda "{{ search_query }}" en 
+                        {% if search_type == 'tabla' %}nombres de tablas
+                        {% elif search_type == 'contenido' %}contenido de registros
+                        {% else %}todos los campos{% endif %}
+                        - Mostrando {{ total_tablas }} de {{ total_registros }} tablas totales
+                    </div>
+                    {% endif %}
                     
                     {% if tablas_stats %}
                     <div class="alert alert-success">
@@ -164,10 +257,213 @@
     transform: scale(1.1);
     box-shadow: 0 0 5px rgba(13, 110, 253, 0.5);
 }
+
+/* Estilos para búsqueda */
+#searchInput {
+    border-radius: 0.375rem 0 0 0.375rem;
+}
+
+#clearSearch {
+    border-radius: 0 0.375rem 0.375rem 0;
+}
+
+#quickSearchResults {
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.search-highlight {
+    background-color: #fff3cd;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-weight: bold;
+}
+
+.quick-search-item {
+    transition: all 0.2s ease;
+}
+
+.quick-search-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Variables para búsqueda
+    const searchInput = document.getElementById('searchInput');
+    const searchType = document.getElementById('searchType');
+    const clearSearchBtn = document.getElementById('clearSearch');
+    const quickSearchBtn = document.getElementById('btnBusquedaRapida');
+    const quickSearchResults = document.getElementById('quickSearchResults');
+    const quickSearchContent = document.getElementById('quickSearchContent');
+    const closeQuickSearch = document.getElementById('closeQuickSearch');
+    
+    let searchTimeout;
+    
+    // Búsqueda rápida AJAX
+    function realizarBusquedaRapida() {
+        const query = searchInput.value.trim();
+        const type = searchType.value;
+        
+        if (!query) {
+            quickSearchResults.style.display = 'none';
+            return;
+        }
+        
+        // Mostrar loading
+        quickSearchContent.innerHTML = `
+            <div class="text-center py-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Buscando...</span>
+                </div>
+                <p class="mt-2 mb-0">Buscando "${query}"...</p>
+            </div>
+        `;
+        quickSearchResults.style.display = 'block';
+        
+        // Realizar búsqueda AJAX
+        const searchUrl = '{% url "datos_archivados:buscar_datos_ajax" %}';
+        fetch(`${searchUrl}?q=${encodeURIComponent(query)}&type=${type}&limit=5`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    quickSearchContent.innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="bi bi-exclamation-triangle"></i> ${data.error}
+                        </div>
+                    `;
+                    return;
+                }
+                
+                if (data.results.length === 0) {
+                    quickSearchContent.innerHTML = `
+                        <div class="alert alert-warning">
+                            <i class="bi bi-search"></i> No se encontraron resultados para "${query}"
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Mostrar resultados
+                let html = `
+                    <div class="mb-3">
+                        <strong><i class="bi bi-search"></i> Encontrados ${data.total} registros en ${data.results.length} tabla(s)</strong>
+                    </div>
+                `;
+                
+                data.results.forEach(tabla => {
+                    html += `
+                        <div class="card mb-3 border-success">
+                            <div class="card-header bg-light">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">
+                                        <i class="bi bi-table text-success"></i> ${tabla.tabla}
+                                    </h6>
+                                    <span class="badge bg-success">${tabla.total_registros} registros</span>
+                                </div>
+                            </div>
+                            <div class="card-body py-2">
+                    `;
+                    
+                    if (tabla.ejemplos.length > 0) {
+                        html += '<div class="row">';
+                        tabla.ejemplos.forEach(ejemplo => {
+                            html += `
+                                <div class="col-md-4 mb-2">
+                                    <div class="border rounded p-2 bg-light">
+                                        <small class="text-muted">ID: ${ejemplo.id}</small><br>
+                                        <strong>${ejemplo.nombre}</strong>
+                            `;
+                            
+                            if (ejemplo.campos_coincidentes.length > 0) {
+                                html += '<br><small class="text-success">';
+                                ejemplo.campos_coincidentes.forEach(campo => {
+                                    html += `<strong>${campo.campo}:</strong> ${campo.valor}<br>`;
+                                });
+                                html += '</small>';
+                            }
+                            
+                            html += `
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                    }
+                    
+                    html += `
+                                <div class="text-end mt-2">
+                                    <a href="/datos-archivados/tablas/${tabla.tabla}/" 
+                                       class="btn btn-sm btn-success">
+                                        <i class="bi bi-eye"></i> Ver todos los registros
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                quickSearchContent.innerHTML = html;
+            })
+            .catch(error => {
+                quickSearchContent.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="bi bi-exclamation-triangle"></i> Error en la búsqueda: ${error.message}
+                    </div>
+                `;
+            });
+    }
+    
+    // Event listeners para búsqueda
+    quickSearchBtn.addEventListener('click', realizarBusquedaRapida);
+    
+    // Búsqueda en tiempo real (con debounce)
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            if (searchInput.value.trim().length >= 2) {
+                realizarBusquedaRapida();
+            } else {
+                quickSearchResults.style.display = 'none';
+            }
+        }, 500);
+    });
+    
+    // Limpiar búsqueda
+    clearSearchBtn.addEventListener('click', function() {
+        searchInput.value = '';
+        quickSearchResults.style.display = 'none';
+        // Opcional: recargar página para mostrar todas las tablas
+        if (window.location.search) {
+            window.location.href = window.location.pathname;
+        }
+    });
+    
+    // Cerrar búsqueda rápida
+    closeQuickSearch.addEventListener('click', function() {
+        quickSearchResults.style.display = 'none';
+    });
+    
+    // Cambio en tipo de búsqueda
+    searchType.addEventListener('change', function() {
+        if (searchInput.value.trim()) {
+            realizarBusquedaRapida();
+        }
+    });
+    
+    // Variables para modo selección (código existente)
     let modoSeleccion = false;
     const btnModoSeleccion = document.getElementById('btnModoSeleccion');
     const btnEliminar = document.getElementById('btnEliminar');
