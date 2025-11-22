@@ -21,6 +21,9 @@ urlpatterns = [
     
     # Usuarios archivados
     path('reclamar-usuario/', views.reclamar_usuario_archivado, name='reclamar_usuario'),
+    path('iniciar-reclamacion/<int:dato_id>/', views.iniciar_reclamacion_usuario, name='iniciar_reclamacion_usuario'),
+    path('verificar-codigo-reclamacion/', views.verificar_codigo_reclamacion, name='verificar_codigo_reclamacion'),
+    path('reclamar-usuario-dinamico/<int:dato_id>/', views.reclamar_usuario_dinamico, name='reclamar_usuario_dinamico'),
     path('buscar-usuario/', views.buscar_usuario_archivado, name='buscar_usuario'),
     
     # Búsqueda AJAX

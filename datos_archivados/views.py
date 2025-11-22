@@ -767,9 +767,7 @@ def buscar_usuario_archivado(request):
     if request.method == 'GET' and 'busqueda' in request.GET:
         form = BuscarUsuarioArchivadoForm(request.GET)
         if form.is_valid():
-            usuarios_encontrados = form.buscar_usuarios().filter(
-                usuario_actual__isnull=True  # Solo usuarios no reclamados
-            )[:20]  # Limitar resultados
+            usuarios_encontrados = form.buscar_usuarios()
     
     context = {
         'form': form,
@@ -777,6 +775,241 @@ def buscar_usuario_archivado(request):
     }
     
     return render(request, 'datos_archivados/buscar_usuario.html', context)
+
+def iniciar_reclamacion_usuario(request, dato_id):
+    """Vista para iniciar el proceso de reclamación enviando código de verificación"""
+    from .models import DatoArchivadoDinamico, CodigoVerificacionReclamacion
+    from django.shortcuts import get_object_or_404
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from django.utils import timezone
+    from datetime import timedelta
+    import random
+    import string
+    
+    # Obtener el dato archivado
+    dato = get_object_or_404(DatoArchivadoDinamico, id=dato_id)
+    datos = dato.datos_originales
+    email = datos.get('email') or datos.get('correo')
+    
+    if not email:
+        messages.error(request, 'No se encontró un email válido para este usuario archivado.')
+        return redirect('datos_archivados:buscar_usuario')
+    
+    # Generar código de 4 dígitos
+    codigo = ''.join(random.choices(string.digits, k=4))
+    
+    # Crear o actualizar código de verificación
+    fecha_expiracion = timezone.now() + timedelta(minutes=15)  # Expira en 15 minutos
+    
+    # Eliminar códigos anteriores para este email
+    CodigoVerificacionReclamacion.objects.filter(email=email).delete()
+    
+    # Crear nuevo código
+    codigo_verificacion = CodigoVerificacionReclamacion.objects.create(
+        email=email,
+        codigo=codigo,
+        dato_archivado=dato,
+        fecha_expiracion=fecha_expiracion
+    )
+    
+    # Enviar email
+    username = datos.get('username') or datos.get('user') or 'Usuario'
+    email_text = f'''Hola {username},
+
+Se ha solicitado reclamar su cuenta archivada en el Centro Fray Bartolomé de las Casas.
+
+Para continuar con el proceso, ingrese el siguiente código de verificación:
+
+{codigo}
+
+Este código expirará en 15 minutos.
+
+Si usted no solicitó esta acción, ignore este mensaje.
+
+Centro Fray Bartolomé de las Casas'''
+    
+    try:
+        send_mail(
+            'Código de Verificación - Reclamación de Cuenta Archivada',
+            email_text,
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        
+        # Guardar información en sesión para el siguiente paso
+        request.session['reclamacion_dato_id'] = dato_id
+        request.session['reclamacion_email'] = email
+        
+        messages.success(request, f'Se ha enviado un código de verificación a {email}')
+        return redirect('datos_archivados:verificar_codigo_reclamacion')
+        
+    except Exception as e:
+        messages.error(request, f'Error al enviar el código de verificación: {str(e)}')
+        return redirect('datos_archivados:buscar_usuario')
+
+def verificar_codigo_reclamacion(request):
+    """Vista para verificar el código de 4 dígitos"""
+    from .models import CodigoVerificacionReclamacion
+    
+    # Verificar que hay una reclamación en proceso
+    dato_id = request.session.get('reclamacion_dato_id')
+    email = request.session.get('reclamacion_email')
+    
+    if not dato_id or not email:
+        messages.error(request, 'No hay un proceso de reclamación activo.')
+        return redirect('datos_archivados:buscar_usuario')
+    
+    if request.method == 'POST':
+        codigo_ingresado = request.POST.get('code', '').strip()
+        
+        if not codigo_ingresado:
+            messages.error(request, 'Debe ingresar el código de verificación.')
+            return render(request, 'datos_archivados/verificar_codigo_reclamacion.html', {
+                'email': email
+            })
+        
+        try:
+            # Buscar código válido
+            codigo_verificacion = CodigoVerificacionReclamacion.objects.get(
+                email=email,
+                codigo=codigo_ingresado,
+                usado=False
+            )
+            
+            if codigo_verificacion.is_expired():
+                messages.error(request, 'El código de verificación ha expirado. Solicite uno nuevo.')
+                return render(request, 'datos_archivados/verificar_codigo_reclamacion.html', {
+                    'email': email
+                })
+            
+            # Marcar código como usado
+            codigo_verificacion.usado = True
+            codigo_verificacion.save()
+            
+            # Redirigir a la página de reclamación
+            messages.success(request, 'Código verificado correctamente.')
+            return redirect('datos_archivados:reclamar_usuario_dinamico', dato_id=dato_id)
+            
+        except CodigoVerificacionReclamacion.DoesNotExist:
+            messages.error(request, 'Código de verificación incorrecto.')
+            return render(request, 'datos_archivados/verificar_codigo_reclamacion.html', {
+                'email': email
+            })
+    
+    return render(request, 'datos_archivados/verificar_codigo_reclamacion.html', {
+        'email': email
+    })
+
+def reclamar_usuario_dinamico(request, dato_id):
+    """Vista para reclamar un usuario desde datos archivados dinámicos (después de verificación)"""
+    from .models import DatoArchivadoDinamico
+    from django.contrib.auth.models import User, Group
+    from django.contrib.auth import login
+    from django.shortcuts import get_object_or_404
+    
+    # Verificar que el proceso de verificación se completó
+    session_dato_id = request.session.get('reclamacion_dato_id')
+    if not session_dato_id or int(session_dato_id) != dato_id:
+        messages.error(request, 'Debe completar la verificación por email primero.')
+        return redirect('datos_archivados:buscar_usuario')
+    
+    # Obtener el dato archivado
+    dato = get_object_or_404(DatoArchivadoDinamico, id=dato_id)
+    datos = dato.datos_originales
+    
+    if request.method == 'POST':
+        # Obtener datos del formulario
+        nueva_password = request.POST.get('nueva_password')
+        confirmar_password = request.POST.get('confirmar_password')
+        
+        # Validaciones
+        if not nueva_password or not confirmar_password:
+            messages.error(request, 'Debe proporcionar una nueva contraseña.')
+            return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', {
+                'dato': dato,
+                'datos': datos
+            })
+        
+        if nueva_password != confirmar_password:
+            messages.error(request, 'Las contraseñas no coinciden.')
+            return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', {
+                'dato': dato,
+                'datos': datos
+            })
+        
+        if len(nueva_password) < 8:
+            messages.error(request, 'La contraseña debe tener al menos 8 caracteres.')
+            return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', {
+                'dato': dato,
+                'datos': datos
+            })
+        
+        # Extraer información del usuario
+        username = datos.get('username') or datos.get('user') or f"usuario_{dato.id_original}"
+        email = datos.get('email') or datos.get('correo') or ''
+        first_name = datos.get('first_name') or datos.get('nombre') or datos.get('name') or ''
+        last_name = datos.get('last_name') or datos.get('apellido') or datos.get('apellidos') or ''
+        
+        # Verificar que no exista ya un usuario con ese username
+        if User.objects.filter(username=username).exists():
+            messages.error(request, f'Ya existe un usuario con el nombre "{username}". Contacte al administrador.')
+            return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', {
+                'dato': dato,
+                'datos': datos
+            })
+        
+        try:
+            # Crear el nuevo usuario
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                password=nueva_password,
+                is_active=True
+            )
+            
+            # Asignar al grupo Estudiantes por defecto
+            try:
+                grupo_estudiantes = Group.objects.get(name='Estudiantes')
+                user.groups.add(grupo_estudiantes)
+            except Group.DoesNotExist:
+                # Crear el grupo si no existe
+                grupo_estudiantes = Group.objects.create(name='Estudiantes')
+                user.groups.add(grupo_estudiantes)
+            
+            # Limpiar sesión
+            if 'reclamacion_dato_id' in request.session:
+                del request.session['reclamacion_dato_id']
+            if 'reclamacion_email' in request.session:
+                del request.session['reclamacion_email']
+            
+            # Iniciar sesión automáticamente
+            login(request, user)
+            
+            messages.success(
+                request, 
+                f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
+                'Su cuenta ha sido reactivada exitosamente desde los datos archivados.'
+            )
+            
+            return redirect('principal:login_redirect')
+            
+        except Exception as e:
+            messages.error(request, f'Error al crear la cuenta: {str(e)}')
+    
+    context = {
+        'dato': dato,
+        'datos': datos,
+        'username': datos.get('username') or datos.get('user') or f"usuario_{dato.id_original}",
+        'email': datos.get('email') or datos.get('correo') or '',
+        'first_name': datos.get('first_name') or datos.get('nombre') or datos.get('name') or '',
+        'last_name': datos.get('last_name') or datos.get('apellido') or datos.get('apellidos') or '',
+    }
+    
+    return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', context)
 
 @login_required
 def buscar_datos_ajax(request):

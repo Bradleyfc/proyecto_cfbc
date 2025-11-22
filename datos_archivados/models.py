@@ -326,3 +326,34 @@ class DatoArchivadoDinamico(models.Model):
             models.Index(fields=['fecha_migracion']),
             models.Index(fields=['tipo_registro']),
         ]
+
+class CodigoVerificacionReclamacion(models.Model):
+    """
+    Modelo para almacenar códigos de verificación para reclamación de usuarios archivados
+    """
+    email = models.EmailField(verbose_name='Email')
+    codigo = models.CharField(max_length=4, verbose_name='Código de Verificación')
+    dato_archivado = models.ForeignKey(DatoArchivadoDinamico, on_delete=models.CASCADE, 
+                                     null=True, blank=True, verbose_name='Dato Archivado')
+    usuario_archivado = models.ForeignKey(UsuarioArchivado, on_delete=models.CASCADE, 
+                                        null=True, blank=True, verbose_name='Usuario Archivado')
+    fecha_creacion = models.DateTimeField(auto_now_add=True, verbose_name='Fecha de Creación')
+    fecha_expiracion = models.DateTimeField(verbose_name='Fecha de Expiración')
+    usado = models.BooleanField(default=False, verbose_name='Usado')
+    
+    def __str__(self):
+        return f"Código {self.codigo} para {self.email}"
+    
+    def is_expired(self):
+        """Verifica si el código ha expirado"""
+        from django.utils import timezone
+        return timezone.now() > self.fecha_expiracion
+    
+    def is_valid(self):
+        """Verifica si el código es válido (no usado y no expirado)"""
+        return not self.usado and not self.is_expired()
+    
+    class Meta:
+        verbose_name = 'Código de Verificación para Reclamación'
+        verbose_name_plural = 'Códigos de Verificación para Reclamación'
+        ordering = ['-fecha_creacion']

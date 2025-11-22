@@ -114,34 +114,125 @@ class ReclamarUsuarioArchivadoForm(forms.Form):
 
 class BuscarUsuarioArchivadoForm(forms.Form):
     """
-    Formulario para buscar usuarios archivados
+    Formulario para buscar usuarios archivados por correo electrónico
     """
-    busqueda = forms.CharField(
+    busqueda = forms.EmailField(
         max_length=200,
-        label='Buscar usuario',
-        help_text='Ingrese nombre de usuario, email o nombre completo',
-        widget=forms.TextInput(attrs={
-            'placeholder': 'Ej: juan.perez, juan@email.com, Juan Pérez',
+        label='Correo electrónico',
+        help_text='Ingrese su correo electrónico para buscar su cuenta archivada',
+        widget=forms.EmailInput(attrs={
+            'placeholder': 'Ej: juan.perez@email.com',
             'class': 'form-control'
         })
     )
     
     def buscar_usuarios(self):
         """
-        Busca usuarios archivados basado en el término de búsqueda
+        Busca usuarios archivados por correo electrónico en todas las tablas archivadas disponibles
         """
-        busqueda = self.cleaned_data.get('busqueda', '').strip()
+        email_busqueda = self.cleaned_data.get('busqueda', '').strip()
         
-        if not busqueda:
-            return UsuarioArchivado.objects.none()
+        if not email_busqueda:
+            return []
         
-        # Buscar por username, email, nombre o apellido
         from django.db.models import Q
+        from .models import DatoArchivadoDinamico
         
-        return UsuarioArchivado.objects.filter(
-            Q(username__icontains=busqueda) |
-            Q(email__icontains=busqueda) |
-            Q(first_name__icontains=busqueda) |
-            Q(last_name__icontains=busqueda) |
-            Q(carnet__icontains=busqueda)
-        ).order_by('username')
+        usuarios_encontrados = []
+        
+        # Primero buscar en UsuarioArchivado (si hay datos)
+        try:
+            usuarios_archivados = UsuarioArchivado.objects.filter(
+                email__iexact=email_busqueda
+            ).filter(usuario_actual__isnull=True)  # Solo no reclamados
+            
+            for usuario in usuarios_archivados:
+                usuarios_encontrados.append({
+                    'tipo': 'usuario_archivado',
+                    'id': usuario.id,
+                    'username': usuario.username,
+                    'first_name': usuario.first_name,
+                    'last_name': usuario.last_name,
+                    'email': usuario.email,
+                    'carnet': usuario.carnet,
+                    'grupo': usuario.grupo,
+                    'date_joined': usuario.date_joined,
+                    'fuente': 'Usuarios Archivados'
+                })
+        except Exception:
+            pass
+        
+        # Buscar en datos archivados dinámicos - tabla auth_user
+        try:
+            datos_auth_user = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='auth_user'
+            ).filter(
+                datos_originales__email__iexact=email_busqueda
+            )
+            
+            for dato in datos_auth_user:
+                datos = dato.datos_originales
+                usuarios_encontrados.append({
+                    'tipo': 'dato_dinamico',
+                    'id': dato.id,
+                    'username': datos.get('username', ''),
+                    'first_name': datos.get('first_name', ''),
+                    'last_name': datos.get('last_name', ''),
+                    'email': datos.get('email', ''),
+                    'carnet': None,
+                    'grupo': None,
+                    'date_joined': datos.get('date_joined'),
+                    'fuente': 'Tabla auth_user archivada',
+                    'id_original': dato.id_original
+                })
+        except Exception:
+            pass
+        
+        # Buscar en otras tablas que puedan contener información de usuarios
+        try:
+            # Buscar en tablas de perfiles o usuarios por email
+            tablas_usuario = ['auth_user', 'usuarios', 'profiles', 'user_profile', 'perfil_usuario']
+            
+            for tabla in tablas_usuario:
+                datos_tabla = DatoArchivadoDinamico.objects.filter(
+                    tabla_origen=tabla
+                ).filter(
+                    Q(datos_originales__email__iexact=email_busqueda) |
+                    Q(datos_originales__correo__iexact=email_busqueda)
+                )
+                
+                for dato in datos_tabla:
+                    datos = dato.datos_originales
+                    # Intentar extraer información de usuario
+                    username = datos.get('username') or datos.get('user') or datos.get('nombre_usuario')
+                    email = datos.get('email') or datos.get('correo')
+                    first_name = datos.get('first_name') or datos.get('nombre') or datos.get('name')
+                    last_name = datos.get('last_name') or datos.get('apellido') or datos.get('apellidos')
+                    
+                    # Solo agregar si tiene email y coincide con la búsqueda
+                    if email and email.lower() == email_busqueda.lower():
+                        usuarios_encontrados.append({
+                            'tipo': 'dato_dinamico',
+                            'id': dato.id,
+                            'username': username or 'N/A',
+                            'first_name': first_name or '',
+                            'last_name': last_name or '',
+                            'email': email or '',
+                            'carnet': datos.get('carnet') or datos.get('ci') or datos.get('cedula'),
+                            'grupo': datos.get('grupo') or datos.get('role') or datos.get('tipo_usuario'),
+                            'date_joined': datos.get('date_joined') or datos.get('fecha_registro') or datos.get('created_at'),
+                            'fuente': f'Tabla {tabla} archivada',
+                            'id_original': dato.id_original,
+                            'datos_completos': datos
+                        })
+        except Exception:
+            pass
+        
+        # Eliminar duplicados basados en email
+        usuarios_unicos = {}
+        for usuario in usuarios_encontrados:
+            key = usuario['email'].lower() if usuario['email'] else f"sin_email_{usuario['id']}"
+            if key not in usuarios_unicos:
+                usuarios_unicos[key] = usuario
+        
+        return list(usuarios_unicos.values())[:20]  # Limitar a 20 resultados

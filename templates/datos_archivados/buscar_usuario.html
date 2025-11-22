@@ -18,7 +18,7 @@
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle"></i>
                         <strong>Busca tu cuenta anterior</strong><br>
-                        Ingresa tu nombre de usuario, email o nombre completo para encontrar tu cuenta archivada.
+                        Ingresa tu correo electrónico para encontrar tu cuenta archivada.
                     </div>
 
                     <form method="get" class="mb-4">
@@ -38,7 +38,7 @@
                     {% if usuarios_encontrados %}
                         <div class="alert alert-success">
                             <i class="fas fa-check-circle"></i>
-                            Se encontraron {{ usuarios_encontrados|length }} usuario(s) disponible(s) para reclamar.
+                            Se encontraron {{ usuarios_encontrados|length }} usuario(s) en las tablas archivadas.
                         </div>
 
                         <div class="table-responsive">
@@ -48,8 +48,9 @@
                                         <th>Usuario</th>
                                         <th>Nombre Completo</th>
                                         <th>Email</th>
-                                        <th>Grupo</th>
-                                        <th>Fecha Registro</th>
+                                        <th>Grupo/Rol</th>
+                                        <th>Fuente</th>
+                                        <th>Fecha</th>
                                         <th>Acción</th>
                                     </tr>
                                 </thead>
@@ -57,12 +58,20 @@
                                     {% for usuario in usuarios_encontrados %}
                                     <tr>
                                         <td>
-                                            <strong>{{ usuario.username }}</strong>
+                                            <strong>{{ usuario.username|default:"N/A" }}</strong>
                                             {% if usuario.carnet %}
                                                 <br><small class="text-muted">CI: {{ usuario.carnet }}</small>
                                             {% endif %}
+                                            {% if usuario.id_original %}
+                                                <br><small class="text-muted">ID Original: {{ usuario.id_original }}</small>
+                                            {% endif %}
                                         </td>
-                                        <td>{{ usuario.first_name }} {{ usuario.last_name }}</td>
+                                        <td>
+                                            {{ usuario.first_name|default:"" }} {{ usuario.last_name|default:"" }}
+                                            {% if not usuario.first_name and not usuario.last_name %}
+                                                <span class="text-muted">No especificado</span>
+                                            {% endif %}
+                                        </td>
                                         <td>{{ usuario.email|default:"No especificado" }}</td>
                                         <td>
                                             {% if usuario.grupo %}
@@ -71,20 +80,96 @@
                                                 <span class="text-muted">Sin grupo</span>
                                             {% endif %}
                                         </td>
-                                        <td>{{ usuario.date_joined|date:"d/m/Y" }}</td>
                                         <td>
-                                            <a href="{% url 'datos_archivados:reclamar_usuario' %}" 
-                                               class="btn btn-sm btn-success"
-                                               title="Reclamar esta cuenta">
-                                                <i class="fas fa-user-check"></i>
-                                                Reclamar
-                                            </a>
+                                            <small class="text-info">{{ usuario.fuente }}</small>
+                                        </td>
+                                        <td>
+                                            {% if usuario.date_joined %}
+                                                {{ usuario.date_joined|date:"d/m/Y" }}
+                                            {% else %}
+                                                <span class="text-muted">N/A</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            {% if usuario.tipo == 'usuario_archivado' %}
+                                                <a href="{% url 'datos_archivados:reclamar_usuario' %}" 
+                                                   class="btn btn-sm btn-success"
+                                                   title="Reclamar esta cuenta">
+                                                    <i class="fas fa-user-check"></i>
+                                                    Reclamar
+                                                </a>
+                                            {% else %}
+                                                <div class="btn-group" role="group">
+                                                    <button type="button" 
+                                                            class="btn btn-sm btn-info"
+                                                            data-bs-toggle="modal" 
+                                                            data-bs-target="#modalDatos{{ forloop.counter }}"
+                                                            title="Ver datos completos">
+                                                        <i class="fas fa-eye"></i>
+                                                        Ver
+                                                    </button>
+                                                    <a href="{% url 'datos_archivados:iniciar_reclamacion_usuario' usuario.id %}" 
+                                                       class="btn btn-sm btn-success"
+                                                       title="Reclamar esta cuenta">
+                                                        <i class="fas fa-user-check"></i>
+                                                        Reclamar
+                                                    </a>
+                                                </div>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
                         </div>
+
+                        <!-- Modales para mostrar datos completos -->
+                        {% for usuario in usuarios_encontrados %}
+                            {% if usuario.tipo == 'dato_dinamico' %}
+                            <div class="modal fade" id="modalDatos{{ forloop.counter }}" tabindex="-1">
+                                <div class="modal-dialog modal-lg">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">
+                                                Datos Archivados - {{ usuario.username|default:"Usuario sin nombre" }}
+                                            </h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <div class="row">
+                                                <div class="col-md-6">
+                                                    <h6>Información Básica:</h6>
+                                                    <ul class="list-unstyled">
+                                                        <li><strong>Usuario:</strong> {{ usuario.username|default:"N/A" }}</li>
+                                                        <li><strong>Nombre:</strong> {{ usuario.first_name|default:"N/A" }}</li>
+                                                        <li><strong>Apellidos:</strong> {{ usuario.last_name|default:"N/A" }}</li>
+                                                        <li><strong>Email:</strong> {{ usuario.email|default:"N/A" }}</li>
+                                                        <li><strong>Carnet:</strong> {{ usuario.carnet|default:"N/A" }}</li>
+                                                        <li><strong>Fuente:</strong> {{ usuario.fuente }}</li>
+                                                    </ul>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    {% if usuario.datos_completos %}
+                                                    <h6>Datos Completos:</h6>
+                                                    <div style="max-height: 300px; overflow-y: auto;">
+                                                        <pre class="small">{{ usuario.datos_completos|pprint }}</pre>
+                                                    </div>
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                                            <a href="{% url 'datos_archivados:iniciar_reclamacion_usuario' usuario.id %}" class="btn btn-primary">
+                                                <i class="fas fa-user-check"></i>
+                                                Reclamar Cuenta
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
 
                         {% if usuarios_encontrados|length == 20 %}
                             <div class="alert alert-warning">
@@ -96,8 +181,8 @@
                     {% elif form.is_bound %}
                         <div class="alert alert-warning">
                             <i class="fas fa-exclamation-triangle"></i>
-                            No se encontraron usuarios archivados con ese término de búsqueda.
-                            <br><small>Intenta con tu nombre de usuario completo, email o nombre real.</small>
+                            No se encontraron usuarios archivados con ese correo electrónico.
+                            <br><small>Verifica que el correo electrónico sea exactamente el mismo que usabas anteriormente.</small>
                         </div>
                     {% endif %}
 
