@@ -37,13 +37,13 @@
                                                 <input type="text" 
                                                        class="form-control" 
                                                        id="searchInput" 
-                                                       placeholder="Buscar por nombre, email, username, etc..."
+                                                       placeholder="Buscar por nombre, email, username..."
                                                        autocomplete="off">
                                                 <button class="btn btn-outline-secondary" type="button" id="clearSearch" title="Limpiar búsqueda">
                                                     <i class="bi bi-x-circle"></i>
                                                 </button>
                                             </div>
-                                            <small class="text-muted">Busca en todos los campos incluyendo email, username, etc.</small>
+                                            <small class="text-muted">Los resultados se filtran automáticamente mientras escribes</small>
                                         </div>
                                     </div>
                                 </div>
@@ -85,10 +85,7 @@
                             </thead>
                             <tbody>
                                 {% for dato in datos %}
-                                <tr data-username="{{ dato.datos_originales.username|default:'' }}" 
-                                    data-email="{{ dato.datos_originales.email|default:'' }}" 
-                                    data-firstname="{{ dato.datos_originales.first_name|default:'' }}" 
-                                    data-lastname="{{ dato.datos_originales.last_name|default:'' }}">
+                                <tr>
                                     <td>{{ dato.pk }}</td>
                                     <td><span class="badge bg-secondary">{{ dato.tabla_origen }}</span></td>
                                     <td>{{ dato.id_original }}</td>
@@ -119,7 +116,7 @@
 </div>
 
 <script>
-// Búsqueda mejorada que incluye datos completos
+// Búsqueda rápida del lado del cliente
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('searchInput');
     const clearButton = document.getElementById('clearSearch');
@@ -135,22 +132,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const allRows = Array.from(tbody.querySelectorAll('tr'));
     const totalRows = allRows.length;
     
-    // Función de búsqueda mejorada
+    // Función de búsqueda
     function filtrarTabla() {
         const query = searchInput.value.toLowerCase().trim();
         let visibleCount = 0;
         
         allRows.forEach(row => {
-            // Buscar en el contenido visible Y en los atributos data-*
-            const visibleText = row.textContent.toLowerCase();
-            const username = (row.getAttribute('data-username') || '').toLowerCase();
-            const email = (row.getAttribute('data-email') || '').toLowerCase();
-            const firstname = (row.getAttribute('data-firstname') || '').toLowerCase();
-            const lastname = (row.getAttribute('data-lastname') || '').toLowerCase();
-            
-            const allContent = visibleText + ' ' + username + ' ' + email + ' ' + firstname + ' ' + lastname;
-            
-            if (query === '' || allContent.includes(query)) {
+            const text = row.textContent.toLowerCase();
+            if (query === '' || text.includes(query)) {
                 row.style.display = '';
                 visibleCount++;
             } else {
