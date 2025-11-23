@@ -5,6 +5,8 @@ from django.utils.decorators import method_decorator
 from django.db.models import Count
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponse
+from django.core.mail import send_mail
+from django.conf import settings
 import json
 
 def es_secretaria(user):
@@ -734,28 +736,368 @@ def eliminar_tablas(request):
     return redirect('datos_archivados:tablas_list')
 
 def reclamar_usuario_archivado(request):
-    """Vista para que usuarios reclamen su cuenta archivada"""
+    """Vista para que usuarios reclamen su cuenta archivada - Paso 1: Validar datos y enviar código"""
     from .forms import ReclamarUsuarioArchivadoForm
-    from django.contrib.auth import login
+    from .models import CodigoVerificacionReclamacion, UsuarioArchivado
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from django.utils import timezone
+    from datetime import timedelta
+    import random
+    import string
     
     if request.method == 'POST':
         form = ReclamarUsuarioArchivadoForm(request.POST)
         if form.is_valid():
             try:
-                user = form.save()
-                login(request, user)
-                messages.success(
-                    request, 
-                    f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
-                    'Su cuenta ha sido reactivada exitosamente.'
+                # Obtener el usuario encontrado y su tipo
+                usuario_encontrado = form.cleaned_data['usuario_encontrado']
+                tipo_fuente = form.cleaned_data['tipo_fuente']
+                
+                # Extraer email y username según el tipo de fuente
+                if tipo_fuente == 'usuario_archivado':
+                    email = usuario_encontrado.email
+                    username = usuario_encontrado.username
+                    usuario_archivado_id = usuario_encontrado.id
+                    dato_archivado_id = None
+                else:  # dato_dinamico
+                    datos = usuario_encontrado.datos_originales
+                    email = datos.get('email')
+                    username = datos.get('username')
+                    usuario_archivado_id = None
+                    dato_archivado_id = usuario_encontrado.id
+                
+                # Generar código de 4 dígitos
+                codigo = ''.join(random.choices(string.digits, k=4))
+                
+                # Crear o actualizar código de verificación
+                fecha_expiracion = timezone.now() + timedelta(minutes=15)
+                
+                # Eliminar códigos anteriores para este email
+                CodigoVerificacionReclamacion.objects.filter(email=email).delete()
+                
+                # Crear nuevo código
+                codigo_obj = CodigoVerificacionReclamacion.objects.create(
+                    email=email,
+                    codigo=codigo,
+                    fecha_expiracion=fecha_expiracion
                 )
-                return redirect('principal:login_redirect')
+                
+                # Vincular con la fuente correspondiente
+                if tipo_fuente == 'usuario_archivado':
+                    codigo_obj.usuario_archivado = usuario_encontrado
+                else:
+                    codigo_obj.dato_archivado = usuario_encontrado
+                codigo_obj.save()
+                
+                # Enviar email
+                email_text = f'''Hola {username},
+
+Se ha solicitado reclamar su cuenta archivada en el Centro Fray Bartolomé de las Casas.
+
+Para continuar con el proceso, ingrese el siguiente código de verificación:
+
+{codigo}
+
+Este código expirará en 15 minutos.
+
+Si usted no solicitó esta acción, ignore este mensaje.
+
+Centro Fray Bartolomé de las Casas'''
+                
+                send_mail(
+                    'Código de Verificación - Reclamación de Cuenta Archivada',
+                    email_text,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [email],
+                    fail_silently=False,
+                )
+                
+                # Guardar información en sesión para el siguiente paso
+                request.session['reclamacion_tipo_fuente'] = tipo_fuente
+                if usuario_archivado_id:
+                    request.session['reclamacion_usuario_archivado_id'] = usuario_archivado_id
+                if dato_archivado_id:
+                    request.session['reclamacion_dato_archivado_id'] = dato_archivado_id
+                request.session['reclamacion_email'] = email
+                request.session['reclamacion_nueva_password'] = form.cleaned_data['nueva_password']
+                
+                messages.success(request, f'Se ha enviado un código de verificación a {email}')
+                return redirect('datos_archivados:verificar_codigo_reclamacion_tradicional')
+                
             except Exception as e:
-                messages.error(request, f'Error al reactivar la cuenta: {str(e)}')
+                messages.error(request, f'Error al enviar el código de verificación: {str(e)}')
     else:
         form = ReclamarUsuarioArchivadoForm()
     
     return render(request, 'datos_archivados/reclamar_usuario.html', {'form': form})
+
+def reenviar_codigo_reclamacion_tradicional(request):
+    """Vista para reenviar el código de verificación"""
+    from .models import CodigoVerificacionReclamacion, UsuarioArchivado, DatoArchivadoDinamico
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from django.utils import timezone
+    from datetime import timedelta
+    import random
+    import string
+    
+    # Verificar que hay una reclamación en proceso
+    tipo_fuente = request.session.get('reclamacion_tipo_fuente')
+    usuario_archivado_id = request.session.get('reclamacion_usuario_archivado_id')
+    dato_archivado_id = request.session.get('reclamacion_dato_archivado_id')
+    email = request.session.get('reclamacion_email')
+    
+    if not email or not tipo_fuente:
+        messages.error(request, 'No hay un proceso de reclamación activo.')
+        return redirect('datos_archivados:reclamar_usuario')
+    
+    try:
+        # Generar nuevo código de 4 dígitos
+        codigo = ''.join(random.choices(string.digits, k=4))
+        
+        # Eliminar códigos anteriores para este email
+        CodigoVerificacionReclamacion.objects.filter(email=email).delete()
+        
+        # Crear nuevo código
+        fecha_expiracion = timezone.now() + timedelta(minutes=15)
+        codigo_obj = CodigoVerificacionReclamacion.objects.create(
+            email=email,
+            codigo=codigo,
+            fecha_expiracion=fecha_expiracion
+        )
+        
+        # Vincular con la fuente correspondiente
+        if tipo_fuente == 'usuario_archivado' and usuario_archivado_id:
+            usuario_archivado = UsuarioArchivado.objects.get(id=usuario_archivado_id)
+            codigo_obj.usuario_archivado = usuario_archivado
+            username = usuario_archivado.username
+        elif tipo_fuente == 'dato_dinamico' and dato_archivado_id:
+            dato_archivado = DatoArchivadoDinamico.objects.get(id=dato_archivado_id)
+            codigo_obj.dato_archivado = dato_archivado
+            datos = dato_archivado.datos_originales
+            username = datos.get('username', email.split('@')[0])
+        else:
+            username = email.split('@')[0]
+        
+        codigo_obj.save()
+        
+        # Enviar email
+        email_text = f'''Hola {username},
+
+Se ha solicitado un nuevo código de verificación para reclamar su cuenta archivada en el Centro Fray Bartolomé de las Casas.
+
+Su nuevo código de verificación es:
+
+{codigo}
+
+Este código expirará en 15 minutos.
+
+Si usted no solicitó esta acción, ignore este mensaje.
+
+Centro Fray Bartolomé de las Casas'''
+        
+        send_mail(
+            'Nuevo Código de Verificación - Reclamación de Cuenta',
+            email_text,
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        
+        messages.success(request, f'Se ha enviado un nuevo código de verificación a {email}')
+        return redirect('datos_archivados:verificar_codigo_reclamacion_tradicional')
+        
+    except Exception as e:
+        messages.error(request, f'Error al reenviar el código: {str(e)}')
+        return redirect('datos_archivados:verificar_codigo_reclamacion_tradicional')
+
+def verificar_codigo_reclamacion_tradicional(request):
+    """Vista para verificar el código de 4 dígitos en reclamación tradicional"""
+    from .models import CodigoVerificacionReclamacion, UsuarioArchivado, DatoArchivadoDinamico
+    from django.contrib.auth import login
+    from django.contrib.auth.models import User, Group
+    
+    # Verificar que hay una reclamación en proceso
+    tipo_fuente = request.session.get('reclamacion_tipo_fuente')
+    usuario_archivado_id = request.session.get('reclamacion_usuario_archivado_id')
+    dato_archivado_id = request.session.get('reclamacion_dato_archivado_id')
+    email = request.session.get('reclamacion_email')
+    nueva_password = request.session.get('reclamacion_nueva_password')
+    
+    if not email or not nueva_password or not tipo_fuente:
+        messages.error(request, 'No hay un proceso de reclamación activo.')
+        return redirect('datos_archivados:reclamar_usuario')
+    
+    if request.method == 'POST':
+        codigo_ingresado = request.POST.get('code', '').strip()
+        
+        if not codigo_ingresado:
+            messages.error(request, 'Debe ingresar el código de verificación.')
+            return render(request, 'datos_archivados/verificar_codigo_reclamacion_tradicional.html', {
+                'email': email
+            })
+        
+        try:
+            # Buscar código válido (el más reciente si hay múltiples)
+            codigo_verificacion = CodigoVerificacionReclamacion.objects.filter(
+                email=email,
+                codigo=codigo_ingresado,
+                usado=False
+            ).order_by('-fecha_creacion').first()
+            
+            if not codigo_verificacion:
+                raise CodigoVerificacionReclamacion.DoesNotExist()
+            
+            if codigo_verificacion.is_expired():
+                messages.error(request, 'El código de verificación ha expirado. Solicite uno nuevo.')
+                return render(request, 'datos_archivados/verificar_codigo_reclamacion_tradicional.html', {
+                    'email': email
+                })
+            
+            # NO marcar como usado todavía - esperar a que todo se complete
+            
+            # Obtener datos según el tipo de fuente
+            if tipo_fuente == 'usuario_archivado':
+                usuario_archivado = UsuarioArchivado.objects.get(id=usuario_archivado_id)
+                username_original = usuario_archivado.username
+                email_usuario = usuario_archivado.email
+                first_name = usuario_archivado.first_name
+                last_name = usuario_archivado.last_name
+            else:  # dato_dinamico
+                dato_archivado = DatoArchivadoDinamico.objects.get(id=dato_archivado_id)
+                datos = dato_archivado.datos_originales
+                username_original = datos.get('username', '')
+                email_usuario = datos.get('email', '')
+                first_name = datos.get('first_name', '')
+                last_name = datos.get('last_name', '')
+            
+            # Generar username único con protección contra condiciones de carrera
+            from django.db import IntegrityError
+            
+            user = None
+            max_intentos = 100
+            
+            for intento in range(max_intentos):
+                # Generar username candidato
+                if intento == 0:
+                    username_candidato = username_original
+                else:
+                    username_candidato = f"{username_original}{intento - 1}"
+                
+                # Verificar si ya existe
+                if User.objects.filter(username=username_candidato).exists():
+                    continue
+                
+                # Intentar crear el usuario
+                try:
+                    user = User.objects.create_user(
+                        username=username_candidato,
+                        email=email_usuario,
+                        first_name=first_name,
+                        last_name=last_name,
+                        password=nueva_password,
+                        is_active=True
+                    )
+                    username_final = username_candidato
+                    break  # Usuario creado exitosamente
+                except IntegrityError:
+                    # El username fue creado por otro proceso entre la verificación y la creación
+                    # Continuar con el siguiente número
+                    continue
+            
+            if not user:
+                messages.error(request, 'No se pudo generar un username único. Contacte al administrador.')
+                return redirect('datos_archivados:reclamar_usuario')
+            
+            # Asignar al grupo Estudiantes
+            try:
+                grupo_estudiantes = Group.objects.get(name='Estudiantes')
+                user.groups.add(grupo_estudiantes)
+            except Group.DoesNotExist:
+                grupo_estudiantes = Group.objects.create(name='Estudiantes')
+                user.groups.add(grupo_estudiantes)
+            
+            # Vincular con la fuente correspondiente
+            if tipo_fuente == 'usuario_archivado':
+                usuario_archivado.usuario_actual = user
+                usuario_archivado.save()
+            
+            # Enviar email de confirmación
+            username_cambio = username_original != username_final
+            
+            if username_cambio:
+                mensaje_username = f'''IMPORTANTE: Su nombre de usuario ha cambiado
+Nombre de usuario original: {username_original}
+Nuevo nombre de usuario: {username_final}
+
+Esto se debe a que ya existía un usuario con el nombre "{username_original}" en el sistema.
+Por favor, use "{username_final}" para futuros inicios de sesión.'''
+            else:
+                mensaje_username = f'Su nombre de usuario es: {username_final}'
+            
+            mensaje = f'''¡Bienvenido de vuelta al Centro Fray Bartolomé de las Casas!
+
+Su cuenta ha sido reactivada exitosamente.
+
+DETALLES DE SU CUENTA:
+{mensaje_username}
+Correo electrónico: {user.email}
+Nombre completo: {user.get_full_name()}
+
+Ahora puede acceder a todos los servicios del sistema usando sus credenciales.
+
+Si tiene alguna pregunta o necesita ayuda, no dude en contactarnos.
+
+Saludos cordiales,
+Centro Fray Bartolomé de las Casas'''
+            
+            send_mail(
+                'Cuenta Reactivada - Centro Fray Bartolomé de las Casas',
+                mensaje,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            
+            # Marcar código como usado SOLO después de que todo se completó exitosamente
+            codigo_verificacion.usado = True
+            codigo_verificacion.save()
+            
+            # Limpiar sesión
+            if 'reclamacion_usuario_archivado_id' in request.session:
+                del request.session['reclamacion_usuario_archivado_id']
+            if 'reclamacion_dato_archivado_id' in request.session:
+                del request.session['reclamacion_dato_archivado_id']
+            if 'reclamacion_tipo_fuente' in request.session:
+                del request.session['reclamacion_tipo_fuente']
+            del request.session['reclamacion_email']
+            del request.session['reclamacion_nueva_password']
+            
+            # Iniciar sesión automáticamente con backend específico
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+            
+            messages.success(
+                request, 
+                f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
+                'Su cuenta ha sido reactivada exitosamente. '
+                'Se le ha enviado un email con los detalles de su cuenta.'
+            )
+            
+            return redirect('principal:login_redirect')
+            
+        except CodigoVerificacionReclamacion.DoesNotExist:
+            messages.error(request, 'Código de verificación incorrecto.')
+            return render(request, 'datos_archivados/verificar_codigo_reclamacion_tradicional.html', {
+                'email': email
+            })
+        except Exception as e:
+            messages.error(request, f'Error al reactivar la cuenta: {str(e)}')
+            return redirect('datos_archivados:reclamar_usuario')
+    
+    return render(request, 'datos_archivados/verificar_codigo_reclamacion_tradicional.html', {
+        'email': email
+    })
 
 def buscar_usuario_archivado(request):
     """Vista para buscar usuarios archivados disponibles para reclamar"""
@@ -849,6 +1191,75 @@ Centro Fray Bartolomé de las Casas'''
         messages.error(request, f'Error al enviar el código de verificación: {str(e)}')
         return redirect('datos_archivados:buscar_usuario')
 
+def reenviar_codigo_reclamacion(request):
+    """Vista para reenviar el código de verificación (búsqueda por email)"""
+    from .models import CodigoVerificacionReclamacion, DatoArchivadoDinamico
+    from django.core.mail import send_mail
+    from django.conf import settings
+    from django.utils import timezone
+    from datetime import timedelta
+    import random
+    import string
+    
+    # Verificar que hay una reclamación en proceso
+    dato_id = request.session.get('reclamacion_dato_id')
+    email = request.session.get('reclamacion_email')
+    
+    if not dato_id or not email:
+        messages.error(request, 'No hay un proceso de reclamación activo.')
+        return redirect('datos_archivados:buscar_usuario')
+    
+    try:
+        # Obtener el dato archivado
+        dato = DatoArchivadoDinamico.objects.get(id=dato_id)
+        datos = dato.datos_originales
+        username = datos.get('username') or datos.get('user') or 'Usuario'
+        
+        # Generar nuevo código de 4 dígitos
+        codigo = ''.join(random.choices(string.digits, k=4))
+        
+        # Eliminar códigos anteriores para este email
+        CodigoVerificacionReclamacion.objects.filter(email=email).delete()
+        
+        # Crear nuevo código
+        fecha_expiracion = timezone.now() + timedelta(minutes=15)
+        CodigoVerificacionReclamacion.objects.create(
+            email=email,
+            codigo=codigo,
+            dato_archivado=dato,
+            fecha_expiracion=fecha_expiracion
+        )
+        
+        # Enviar email
+        email_text = f'''Hola {username},
+
+Se ha solicitado un nuevo código de verificación para reclamar su cuenta archivada en el Centro Fray Bartolomé de las Casas.
+
+Su nuevo código de verificación es:
+
+{codigo}
+
+Este código expirará en 15 minutos.
+
+Si usted no solicitó esta acción, ignore este mensaje.
+
+Centro Fray Bartolomé de las Casas'''
+        
+        send_mail(
+            'Nuevo Código de Verificación - Reclamación de Cuenta',
+            email_text,
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        
+        messages.success(request, f'Se ha enviado un nuevo código de verificación a {email}')
+        return redirect('datos_archivados:verificar_codigo_reclamacion')
+        
+    except Exception as e:
+        messages.error(request, f'Error al reenviar el código: {str(e)}')
+        return redirect('datos_archivados:verificar_codigo_reclamacion')
+
 def verificar_codigo_reclamacion(request):
     """Vista para verificar el código de 4 dígitos"""
     from .models import CodigoVerificacionReclamacion
@@ -871,12 +1282,15 @@ def verificar_codigo_reclamacion(request):
             })
         
         try:
-            # Buscar código válido
-            codigo_verificacion = CodigoVerificacionReclamacion.objects.get(
+            # Buscar código válido (el más reciente si hay múltiples)
+            codigo_verificacion = CodigoVerificacionReclamacion.objects.filter(
                 email=email,
                 codigo=codigo_ingresado,
                 usado=False
-            )
+            ).order_by('-fecha_creacion').first()
+            
+            if not codigo_verificacion:
+                raise CodigoVerificacionReclamacion.DoesNotExist()
             
             if codigo_verificacion.is_expired():
                 messages.error(request, 'El código de verificación ha expirado. Solicite uno nuevo.')
@@ -884,7 +1298,7 @@ def verificar_codigo_reclamacion(request):
                     'email': email
                 })
             
-            # Marcar código como usado
+            # Marcar código como usado SOLO después de verificar que es válido
             codigo_verificacion.usado = True
             codigo_verificacion.save()
             
@@ -908,6 +1322,8 @@ def reclamar_usuario_dinamico(request, dato_id):
     from django.contrib.auth.models import User, Group
     from django.contrib.auth import login
     from django.shortcuts import get_object_or_404
+    from django.core.mail import send_mail
+    from django.conf import settings
     
     # Verificar que el proceso de verificación se completó
     session_dato_id = request.session.get('reclamacion_dato_id')
@@ -947,29 +1363,53 @@ def reclamar_usuario_dinamico(request, dato_id):
             })
         
         # Extraer información del usuario
-        username = datos.get('username') or datos.get('user') or f"usuario_{dato.id_original}"
+        username_original = datos.get('username') or datos.get('user') or f"usuario_{dato.id_original}"
         email = datos.get('email') or datos.get('correo') or ''
         first_name = datos.get('first_name') or datos.get('nombre') or datos.get('name') or ''
         last_name = datos.get('last_name') or datos.get('apellido') or datos.get('apellidos') or ''
         
-        # Verificar que no exista ya un usuario con ese username
-        if User.objects.filter(username=username).exists():
-            messages.error(request, f'Ya existe un usuario con el nombre "{username}". Contacte al administrador.')
+        # Generar username único con protección contra condiciones de carrera
+        from django.db import IntegrityError
+        
+        user = None
+        max_intentos = 100
+        
+        for intento in range(max_intentos):
+            # Generar username candidato
+            if intento == 0:
+                username_candidato = username_original
+            else:
+                username_candidato = f"{username_original}{intento - 1}"
+            
+            # Verificar si ya existe
+            if User.objects.filter(username=username_candidato).exists():
+                continue
+            
+            # Intentar crear el usuario
+            try:
+                user = User.objects.create_user(
+                    username=username_candidato,
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    password=nueva_password,
+                    is_active=True
+                )
+                username_final = username_candidato
+                break  # Usuario creado exitosamente
+            except IntegrityError:
+                # El username fue creado por otro proceso entre la verificación y la creación
+                # Continuar con el siguiente número
+                continue
+        
+        if not user:
+            messages.error(request, f'No se pudo generar un username único para {username_original}. Contacte al administrador.')
             return render(request, 'datos_archivados/reclamar_usuario_dinamico.html', {
                 'dato': dato,
                 'datos': datos
             })
         
         try:
-            # Crear el nuevo usuario
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                password=nueva_password,
-                is_active=True
-            )
             
             # Asignar al grupo Estudiantes por defecto
             try:
@@ -980,19 +1420,61 @@ def reclamar_usuario_dinamico(request, dato_id):
                 grupo_estudiantes = Group.objects.create(name='Estudiantes')
                 user.groups.add(grupo_estudiantes)
             
+            # Enviar email de confirmación con detalles de la cuenta
+            username_cambio = username_original != username_final
+            
+            if username_cambio:
+                mensaje_username = f'''IMPORTANTE: Su nombre de usuario ha cambiado
+Nombre de usuario original: {username_original}
+Nuevo nombre de usuario: {username_final}
+
+Esto se debe a que ya existía un usuario con el nombre "{username_original}" en el sistema.
+Por favor, use "{username_final}" para futuros inicios de sesión.'''
+            else:
+                mensaje_username = f'Su nombre de usuario es: {username_final}'
+            
+            mensaje = f'''¡Bienvenido de vuelta al Centro Fray Bartolomé de las Casas!
+
+Su cuenta ha sido reactivada exitosamente desde los datos archivados.
+
+DETALLES DE SU CUENTA:
+{mensaje_username}
+Correo electrónico: {user.email}
+Nombre completo: {user.get_full_name()}
+
+Ahora puede acceder a todos los servicios del sistema usando sus credenciales.
+
+Si tiene alguna pregunta o necesita ayuda, no dude en contactarnos.
+
+Saludos cordiales,
+Centro Fray Bartolomé de las Casas'''
+            
+            try:
+                send_mail(
+                    'Cuenta Reactivada - Centro Fray Bartolomé de las Casas',
+                    mensaje,
+                    settings.DEFAULT_FROM_EMAIL,
+                    [user.email],
+                    fail_silently=False,
+                )
+            except Exception as e:
+                # No fallar si el email no se puede enviar
+                pass
+            
             # Limpiar sesión
             if 'reclamacion_dato_id' in request.session:
                 del request.session['reclamacion_dato_id']
             if 'reclamacion_email' in request.session:
                 del request.session['reclamacion_email']
             
-            # Iniciar sesión automáticamente
-            login(request, user)
+            # Iniciar sesión automáticamente con backend específico
+            login(request, user, backend='django.contrib.auth.backends.ModelBackend')
             
             messages.success(
                 request, 
                 f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
-                'Su cuenta ha sido reactivada exitosamente desde los datos archivados.'
+                'Su cuenta ha sido reactivada exitosamente desde los datos archivados. '
+                'Se le ha enviado un email con los detalles de su cuenta.'
             )
             
             return redirect('principal:login_redirect')

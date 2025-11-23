@@ -162,14 +162,17 @@ AUTHENTICATION_BACKENDS = [
 
 # Email configuration
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
+# Para desarrollo: usar backend de consola (los emails se muestran en la consola)
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
-EMAIL_HOST_USER =  os.getenv("EMAIL_HOST_USER")  # Usa las variables de entorno
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-# Configuración de timeout para evitar bloqueos prolongados
-EMAIL_TIMEOUT = 60  # segundos
-# Configuración del remitente por defecto para correos noreply
+# Configuración SMTP para producción (comentada por ahora)
+# EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+# EMAIL_HOST = 'smtp.gmail.com'
+# EMAIL_PORT = 587
+# EMAIL_USE_TLS = True
+# EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
+# EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
+# EMAIL_TIMEOUT = 60
+
+# Configuración del remitente por defecto
 DEFAULT_FROM_EMAIL = 'Centro Fray Bartolome de las Casas <noreply@cfbc.edu.ni>'

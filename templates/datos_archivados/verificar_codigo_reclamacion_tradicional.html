@@ -7,7 +7,7 @@
     <div class="row justify-content-center">
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header bg-primary text-white">
+                <div class="card-header bg-success text-white">
                     <h4 class="text-center mb-0">
                         <i class="fas fa-shield-alt"></i>
                         Verificación de Email
@@ -15,7 +15,7 @@
                 </div>
                 <div class="card-body">
                     <div class="text-center mb-4">
-                        <i class="fas fa-envelope-open-text fa-3x text-primary mb-3"></i>
+                        <i class="fas fa-envelope-open-text fa-3x text-success mb-3"></i>
                         <p class="lead">Se ha enviado un código de verificación a:</p>
                         <p class="h5 text-info">{{ email }}</p>
                         <p class="text-muted">Por favor, revise su bandeja de entrada y spam.</p>
@@ -43,9 +43,9 @@
                         </div>
                         
                         <div class="d-grid gap-2">
-                            <button type="submit" class="btn btn-primary btn-lg">
+                            <button type="submit" class="btn btn-success btn-lg">
                                 <i class="fas fa-check-circle"></i>
-                                Verificar Código
+                                Verificar y Reactivar Cuenta
                             </button>
                         </div>
                     </form>
@@ -54,13 +54,13 @@
                         <hr>
                         <p class="text-muted">¿No recibió el código?</p>
                         <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                            <a href="{% url 'datos_archivados:reenviar_codigo_reclamacion' %}" class="btn btn-outline-primary">
+                            <a href="{% url 'datos_archivados:reenviar_codigo_reclamacion_tradicional' %}" class="btn btn-outline-primary">
                                 <i class="fas fa-redo"></i>
                                 Reenviar Código
                             </a>
-                            <a href="{% url 'datos_archivados:buscar_usuario' %}" class="btn btn-outline-secondary">
+                            <a href="{% url 'datos_archivados:reclamar_usuario' %}" class="btn btn-outline-secondary">
                                 <i class="fas fa-arrow-left"></i>
-                                Volver a Buscar
+                                Volver al Formulario
                             </a>
                         </div>
                     </div>
@@ -73,6 +73,7 @@
                             <li>Solo puede usar el código una vez</li>
                             <li>Si no recibe el email, verifique su carpeta de spam</li>
                             <li>El código debe tener exactamente 4 dígitos</li>
+                            <li>Al verificar el código, su cuenta será reactivada automáticamente</li>
                         </ul>
                     </div>
                 </div>

@@ -39,6 +39,10 @@ class UsuarioArchivadoBackend(BaseBackend):
             # Crear usuario actual basado en datos archivados
             user = self.crear_usuario_desde_archivado(usuario_archivado, password)
             if user:
+                # Marcar en la sesión que se creó automáticamente
+                if request:
+                    request.session['usuario_creado_automaticamente'] = True
+                    request.session['usuario_creado_desde'] = 'datos_archivados'
                 return user
                 
         except UsuarioArchivado.DoesNotExist:
@@ -62,6 +66,10 @@ class UsuarioArchivadoBackend(BaseBackend):
                     # Crear usuario desde datos archivados dinámicos
                     user = self.crear_usuario_desde_datos_dinamicos(datos_auth_user, password)
                     if user:
+                        # Marcar en la sesión que se creó automáticamente
+                        if request:
+                            request.session['usuario_creado_automaticamente'] = True
+                            request.session['usuario_creado_desde'] = 'datos_dinamicos'
                         return user
                         
         except Exception as e:
@@ -74,13 +82,13 @@ class UsuarioArchivadoBackend(BaseBackend):
         Crea un usuario actual basado en los datos archivados
         """
         try:
-            # Verificar que no exista ya un usuario con ese username
-            if User.objects.filter(username=usuario_archivado.username).exists():
-                return None
+            # Generar username único si ya existe
+            username_original = usuario_archivado.username
+            username_final = self.generar_username_unico(username_original)
             
             # Crear nuevo usuario
             user = User.objects.create_user(
-                username=usuario_archivado.username,
+                username=username_final,
                 email=usuario_archivado.email,
                 first_name=usuario_archivado.first_name,
                 last_name=usuario_archivado.last_name,
@@ -104,6 +112,9 @@ class UsuarioArchivadoBackend(BaseBackend):
                 grupo_estudiantes = Group.objects.create(name='Estudiantes')
                 user.groups.add(grupo_estudiantes)
                 logger.info(f"Grupo 'Estudiantes' creado y usuario {user.username} agregado")
+            
+            # Enviar email de confirmación
+            self.enviar_email_reactivacion(user, username_original, username_final)
             
             logger.info(f"Usuario creado desde datos archivados: {user.username}")
             return user
@@ -146,22 +157,21 @@ class UsuarioArchivadoBackend(BaseBackend):
         """
         try:
             datos = dato_archivado.datos_originales
-            username = datos.get('username', '')
+            username_original = datos.get('username', '')
             password_archivado = datos.get('password', '')
             
-            if not username or not password_archivado:
+            if not username_original or not password_archivado:
                 return None
             
-            # Verificar que no exista ya un usuario con ese username
-            if User.objects.filter(username=username).exists():
-                return None
+            # Generar username único si ya existe
+            username_final = self.generar_username_unico(username_original)
             
             # Determinar si la contraseña archivada está hasheada o es texto plano
             password_final = self.procesar_password_archivado(password_archivado)
             
             # Crear nuevo usuario usando create() en lugar de create_user() para manejar password manualmente
             user = User(
-                username=username,
+                username=username_final,
                 email=datos.get('email', ''),
                 first_name=datos.get('first_name', ''),
                 last_name=datos.get('last_name', ''),
@@ -183,6 +193,9 @@ class UsuarioArchivadoBackend(BaseBackend):
                 grupo_estudiantes = Group.objects.create(name='Estudiantes')
                 user.groups.add(grupo_estudiantes)
                 logger.info(f"Grupo 'Estudiantes' creado y usuario {user.username} agregado")
+            
+            # Enviar email de confirmación
+            self.enviar_email_reactivacion(user, username_original, username_final)
             
             logger.info(f"Usuario creado desde datos archivados dinámicos: {user.username}")
             return user
@@ -217,3 +230,69 @@ class UsuarioArchivadoBackend(BaseBackend):
         Verifica si el usuario puede autenticarse
         """
         return getattr(user, 'is_active', True)
+    
+    def generar_username_unico(self, username_base):
+        """
+        Genera un username único agregando números consecutivos si ya existe
+        """
+        username_final = username_base
+        contador = 0
+        
+        while User.objects.filter(username=username_final).exists():
+            username_final = f"{username_base}{contador}"
+            contador += 1
+        
+        return username_final
+    
+    def enviar_email_reactivacion(self, user, username_original, username_final):
+        """
+        Envía email de confirmación cuando se reactiva una cuenta desde datos archivados
+        """
+        try:
+            from django.core.mail import send_mail
+            from django.conf import settings
+            
+            # Determinar si el username cambió
+            username_cambio = username_original != username_final
+            
+            # Preparar el mensaje
+            if username_cambio:
+                mensaje_username = f'''IMPORTANTE: Su nombre de usuario ha cambiado
+Nombre de usuario original: {username_original}
+Nuevo nombre de usuario: {username_final}
+
+Esto se debe a que ya existía un usuario con el nombre "{username_original}" en el sistema.
+Por favor, use "{username_final}" para futuros inicios de sesión.'''
+            else:
+                mensaje_username = f'Su nombre de usuario es: {username_final}'
+            
+            # Mensaje completo
+            mensaje = f'''¡Bienvenido de vuelta al Centro Fray Bartolomé de las Casas!
+
+Su cuenta ha sido reactivada automáticamente desde los datos archivados.
+
+DETALLES DE SU CUENTA:
+{mensaje_username}
+Correo electrónico: {user.email}
+Nombre completo: {user.get_full_name()}
+
+Ahora puede acceder a todos los servicios del sistema usando sus credenciales.
+
+Si tiene alguna pregunta o necesita ayuda, no dude en contactarnos.
+
+Saludos cordiales,
+Centro Fray Bartolomé de las Casas'''
+            
+            # Enviar email
+            send_mail(
+                'Cuenta Reactivada - Centro Fray Bartolomé de las Casas',
+                mensaje,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            
+            logger.info(f"Email de reactivación enviado a {user.email}")
+            
+        except Exception as e:
+            logger.error(f"Error enviando email de reactivación: {e}")

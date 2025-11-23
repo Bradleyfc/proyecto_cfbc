@@ -47,6 +47,10 @@ class ReclamarUsuarioArchivadoForm(forms.Form):
         
         # Verificar que el usuario archivado existe
         if username and email:
+            usuario_encontrado = None
+            tipo_fuente = None
+            
+            # Primero buscar en UsuarioArchivado
             try:
                 usuario_archivado = UsuarioArchivado.objects.get(
                     username=username,
@@ -64,18 +68,41 @@ class ReclamarUsuarioArchivadoForm(forms.Form):
                         'Esta cuenta ya ha sido reclamada. Intente recuperar su contraseña.'
                     )
                 
-                # Verificar que no exista ya un usuario con ese username
-                if User.objects.filter(username=username).exists():
-                    raise forms.ValidationError(
-                        'Ya existe un usuario con ese nombre. Contacte al administrador.'
-                    )
-                
-                cleaned_data['usuario_archivado'] = usuario_archivado
+                usuario_encontrado = usuario_archivado
+                tipo_fuente = 'usuario_archivado'
                 
             except UsuarioArchivado.DoesNotExist:
-                raise forms.ValidationError(
-                    'No se encontró un usuario archivado con esos datos'
-                )
+                # Si no está en UsuarioArchivado, buscar en DatoArchivadoDinamico
+                from .models import DatoArchivadoDinamico
+                from django.db.models import Q
+                
+                try:
+                    # Buscar en datos archivados dinámicos - tabla auth_user
+                    dato_archivado = DatoArchivadoDinamico.objects.filter(
+                        tabla_origen='auth_user'
+                    ).filter(
+                        Q(datos_originales__username=username) &
+                        Q(datos_originales__email__iexact=email)
+                    ).first()
+                    
+                    if dato_archivado:
+                        usuario_encontrado = dato_archivado
+                        tipo_fuente = 'dato_dinamico'
+                    else:
+                        raise forms.ValidationError(
+                            'No se encontró un usuario archivado con esos datos. '
+                            'Verifique que el nombre de usuario y email sean correctos.'
+                        )
+                        
+                except Exception as e:
+                    raise forms.ValidationError(
+                        'No se encontró un usuario archivado con esos datos. '
+                        'Verifique que el nombre de usuario y email sean correctos.'
+                    )
+            
+            if usuario_encontrado:
+                cleaned_data['usuario_encontrado'] = usuario_encontrado
+                cleaned_data['tipo_fuente'] = tipo_fuente
         
         return cleaned_data
     

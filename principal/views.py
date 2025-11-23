@@ -832,6 +832,33 @@ class LoginRedirectView(LoginRequiredMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         user = request.user
         if user.is_authenticated:
+            # Verificar si el usuario fue creado automáticamente desde datos archivados
+            if request.session.get('usuario_creado_automaticamente'):
+                fuente = request.session.get('usuario_creado_desde', 'datos_archivados')
+                
+                if fuente == 'datos_dinamicos':
+                    messages.success(
+                        request, 
+                        f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
+                        'Su cuenta ha sido creada automáticamente desde los datos archivados. '
+                        'Ahora puede acceder a todos los servicios del sistema. '
+                        'Se le ha enviado un email con los detalles de su cuenta.'
+                    )
+                else:
+                    messages.success(
+                        request, 
+                        f'¡Bienvenido de vuelta, {user.get_full_name() or user.username}! '
+                        'Su cuenta ha sido reactivada automáticamente desde los datos archivados. '
+                        'Ahora puede acceder a todos los servicios del sistema. '
+                        'Se le ha enviado un email con los detalles de su cuenta.'
+                    )
+                
+                # Limpiar las variables de sesión
+                del request.session['usuario_creado_automaticamente']
+                if 'usuario_creado_desde' in request.session:
+                    del request.session['usuario_creado_desde']
+            
+            # Redirección normal según el grupo del usuario
             if user.groups.filter(name='Profesores').exists() or user.groups.filter(name='Administracion').exists() or user.groups.filter(name='Secretaria').exists():
                 return redirect('principal:profile')  # Redirige a la página de perfil del profesor o el admin
             else:
