@@ -761,6 +761,10 @@ def registro(request):
     return render(request, 'registration/registro.html', data)
 
 def verify_email(request):
+    if 'verification_code' not in request.session or 'user_form_data' not in request.session:
+        messages.error(request, 'La sesión ha expirado. Por favor, inicie el proceso de registro nuevamente.')
+        return redirect('principal:registro')
+    
     if request.method == 'POST':
         code = request.POST.get('code')
         if code == request.session.get('verification_code'):
@@ -825,6 +829,42 @@ def verify_email(request):
         return render(request, 'registration/verify_email.html', {'error': error_message})
 
     return render(request, 'registration/verify_email.html')
+
+def registro_resend_code(request):
+    """
+    Vista para reenviar el código de verificación de registro.
+    """
+    if 'user_form_data' not in request.session or 'verification_code' not in request.session:
+        messages.error(request, 'La sesión ha expirado. Por favor, inicie el proceso de registro nuevamente.')
+        return redirect('principal:registro')
+    
+    user_form_data = request.session.get('user_form_data')
+    email = user_form_data.get('email')
+    
+    if not email:
+        messages.error(request, 'No se encontró el correo electrónico. Por favor, inicie el proceso nuevamente.')
+        return redirect('principal:registro')
+    
+    # Generar nuevo código aleatorio de 4 dígitos
+    verification_code = str(random.randint(1000, 9999))
+    request.session['verification_code'] = verification_code
+    
+    # Enviar email con el nuevo código
+    email_text = 'Bienvenido al Centro Fray Bartolome de las Casas, para completar su registro ingrese el siguiente codigo : ' + verification_code
+    try:
+        send_mail(
+            'Código de Verificación - Centro Fray Bartolome de las Casas',
+            email_text,
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        messages.success(request, 'Se ha reenviado un nuevo código de verificación a su correo electrónico.')
+    except Exception as e:
+        print(f"Error al enviar email: {str(e)}")
+        messages.error(request, 'Error al reenviar el código de verificación. Por favor, intente nuevamente más tarde.')
+    
+    return redirect('principal:verify_email')
 
 # Vista para manejar la redirección después del login
 
@@ -2508,6 +2548,41 @@ def password_reset_verify(request):
             messages.error(request, 'El código ingresado no es válido. Por favor, intente nuevamente.')
     
     return render(request, 'registration/password_reset_verify.html')
+
+def password_reset_resend_code(request):
+    """
+    Vista para reenviar el código de verificación de recuperación de contraseña.
+    """
+    if 'reset_user_id' not in request.session:
+        messages.error(request, 'La sesión ha expirado. Por favor, inicie el proceso nuevamente.')
+        return redirect('principal:password_reset_request')
+    
+    try:
+        user = User.objects.get(id=request.session.get('reset_user_id'))
+        
+        # Generar nuevo código aleatorio de 4 dígitos
+        verification_code = str(random.randint(1000, 9999))
+        request.session['reset_verification_code'] = verification_code
+        
+        # Enviar email con el nuevo código
+        email_text = f'Para restablecer su contraseña en el Centro Fray Bartolome de las Casas, ingrese el siguiente código: {verification_code}'
+        try:
+            send_mail(
+                'Código para Restablecer Contraseña - Centro Fray Bartolome de las Casas',
+                email_text,
+                settings.DEFAULT_FROM_EMAIL,
+                [user.email],
+                fail_silently=False,
+            )
+            messages.success(request, 'Se ha reenviado un nuevo código de verificación a su correo electrónico.')
+        except Exception as e:
+            print(f"Error al enviar email: {str(e)}")
+            messages.error(request, 'Error al reenviar el código de verificación. Por favor, intente nuevamente más tarde.')
+    except User.DoesNotExist:
+        messages.error(request, 'Ha ocurrido un error. Por favor, inicie el proceso nuevamente.')
+        return redirect('principal:password_reset_request')
+    
+    return redirect('principal:password_reset_verify')
 
 def password_reset_confirm(request):
     """
