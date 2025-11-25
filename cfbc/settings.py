@@ -155,7 +155,6 @@ CRISPY_TEMPLATE_PACK = "bootstrap5"
 
 # Backends de autenticación
 AUTHENTICATION_BACKENDS = [
-    'datos_archivados.backends.UsuarioArchivadoBackend',  # Backend personalizado para usuarios archivados
     'django.contrib.auth.backends.ModelBackend',  # Backend por defecto de Django
 ]
 

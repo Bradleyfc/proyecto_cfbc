@@ -1733,3 +1733,937 @@ def debug_permisos(request):
     """
     
     return HttpResponse(info)
+
+
+def agregar_campos_faltantes_a_modelo(modelo, campos_necesarios, logger):
+    """
+    Agrega campos faltantes a un modelo de Django dinámicamente usando ALTER TABLE
+    """
+    from django.db import connection
+    from datetime import datetime, date
+    
+    campos_actuales = {f.name for f in modelo._meta.get_fields()}
+    campos_agregados = []
+    
+    with connection.cursor() as cursor:
+        tabla_nombre = modelo._meta.db_table
+        
+        for campo_nombre, valor_ejemplo in campos_necesarios.items():
+            if campo_nombre not in campos_actuales and campo_nombre not in ['id', 'pk']:
+                try:
+                    # Determinar tipo de campo basado en el valor
+                    if isinstance(valor_ejemplo, bool):
+                        tipo_sql = 'BOOLEAN DEFAULT FALSE'
+                    elif isinstance(valor_ejemplo, int):
+                        tipo_sql = 'INTEGER NULL'
+                    elif isinstance(valor_ejemplo, float):
+                        tipo_sql = 'DOUBLE PRECISION NULL'
+                    elif isinstance(valor_ejemplo, (datetime, date)):
+                        tipo_sql = 'TIMESTAMP NULL'
+                    elif isinstance(valor_ejemplo, str) and len(valor_ejemplo) > 255:
+                        tipo_sql = 'TEXT NULL'
+                    else:
+                        # Por defecto, VARCHAR
+                        tipo_sql = 'VARCHAR(255) NULL'
+                    
+                    # Ejecutar ALTER TABLE
+                    sql = f'ALTER TABLE {tabla_nombre} ADD COLUMN IF NOT EXISTS "{campo_nombre}" {tipo_sql}'
+                    cursor.execute(sql)
+                    
+                    campos_agregados.append(campo_nombre)
+                    logger.info(f"✅ Campo agregado: {tabla_nombre}.{campo_nombre} ({tipo_sql})")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudo agregar campo {campo_nombre} a {tabla_nombre}: {str(e)}")
+    
+    return campos_agregados
+
+def mapear_campos_ingles_espanol(datos_origen, logger=None):
+    """
+    Mapea campos de inglés a español y mantiene ambos
+    Retorna un diccionario con campos mapeados + campos originales
+    """
+    # MAPEO DE CAMPOS: Traducir nombres de inglés a español
+    mapeo_campos = {
+        'nacionality': 'nacionalidad',
+        'numberidentification': 'carnet',
+        'phone': 'telephone',
+        'cellphone': 'movil',
+        'street': 'address',
+        'city': 'location',
+        'state': 'provincia',
+        'degree': 'grado',
+        'ocupation': 'ocupacion',
+        'title': 'titulo',
+        'gender': 'sexo',
+        'name': 'first_name',
+        'lastname': 'last_name',
+        'email': 'email',  # Mantener email
+        'photo': 'image',  # Mapear photo a image
+        'resume': 'titulo',  # Resume puede ser título
+    }
+    
+    # Crear copia con todos los datos originales
+    datos_mapeados = datos_origen.copy()
+    campos_mapeados_count = 0
+    
+    # Aplicar mapeo: agregar campos traducidos
+    for campo_origen, campo_destino in mapeo_campos.items():
+        if campo_origen in datos_origen:
+            datos_mapeados[campo_destino] = datos_origen[campo_origen]
+            campos_mapeados_count += 1
+            if logger:
+                logger.info(f"🔄 Mapeando: {campo_origen} → {campo_destino} = {datos_origen[campo_origen]}")
+    
+    if logger and campos_mapeados_count > 0:
+        logger.info(f"📋 Total de campos mapeados: {campos_mapeados_count}")
+        logger.info(f"📋 Total de campos disponibles: {len(datos_mapeados)} (originales + mapeados)")
+    
+    return datos_mapeados
+
+def copiar_todos_los_campos(objeto_destino, datos_origen, campos_excluir=None, logger=None):
+    """
+    Copia TODOS los campos de datos_origen al objeto_destino
+    NOTA: Los campos deben existir previamente (creados en la fase de detección)
+    """
+    if campos_excluir is None:
+        campos_excluir = ['id', 'pk']
+    
+    campos_copiados = 0
+    campos_no_encontrados = []
+    
+    # Obtener los nombres de campos del modelo
+    campos_modelo = {f.name for f in objeto_destino._meta.get_fields() if not f.many_to_many and not f.one_to_many}
+    
+    for campo_nombre, valor in datos_origen.items():
+        if campo_nombre in campos_excluir:
+            continue
+        
+        # Verificar si el campo existe en el modelo
+        if campo_nombre not in campos_modelo:
+            campos_no_encontrados.append(campo_nombre)
+            if logger:
+                logger.debug(f"⚠️ Campo '{campo_nombre}' no existe en el modelo {objeto_destino.__class__.__name__}")
+            continue
+        
+        try:
+            # Establecer el valor
+            setattr(objeto_destino, campo_nombre, valor)
+            campos_copiados += 1
+            if logger:
+                logger.debug(f"✅ Campo copiado: {campo_nombre} = {valor}")
+        except Exception as e:
+            if logger:
+                logger.warning(f"❌ No se pudo copiar campo {campo_nombre}: {str(e)}")
+    
+    if logger and campos_copiados > 0:
+        logger.info(f"📊 Total campos copiados: {campos_copiados}")
+        if campos_no_encontrados:
+            logger.debug(f"⚠️ Campos no encontrados: {', '.join(campos_no_encontrados[:5])}")
+    
+    return campos_copiados
+
+@login_required
+def combinar_datos_archivados(request):
+    """Vista para combinar TODAS las tablas archivadas con las tablas activas de la base de datos
+    
+    Esta función:
+    1. Detecta campos faltantes en las tablas actuales
+    2. Crea esos campos automáticamente usando ALTER TABLE
+    3. Copia TODA la información de las tablas archivadas
+    """
+    if not tiene_permisos_datos_archivados(request.user):
+        return JsonResponse({'success': False, 'error': 'Sin permisos'}, status=403)
+    
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'Método no permitido'}, status=405)
+    
+    try:
+        from .models import DatoArchivadoDinamico
+        from django.contrib.auth.models import User
+        from accounts.models import Registro
+        from principal.models import (
+            CursoAcademico, Curso, Matriculas, 
+            Asistencia, Calificaciones, NotaIndividual
+        )
+        from django.db import transaction, IntegrityError
+        from django.db.models import Q
+        from datetime import datetime, date
+        from decimal import Decimal
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Contadores
+        estadisticas = {
+            'usuarios_combinados': 0,
+            'registros_combinados': 0,
+            'cursos_academicos_combinados': 0,
+            'cursos_combinados': 0,
+            'matriculas_combinadas': 0,
+            'asistencias_combinadas': 0,
+            'calificaciones_combinadas': 0,
+            'notas_combinadas': 0,
+            'otras_tablas': 0
+        }
+        campos_agregados = []
+        errores = []
+        
+        # Mapeo de usuarios archivados a usuarios actuales
+        mapeo_usuarios = {}
+        
+        with transaction.atomic():
+            # 0. DETECTAR Y AGREGAR CAMPOS FALTANTES
+            logger.info("=== Detectando campos faltantes en modelos ===")
+            
+            # Analizar TODOS los campos necesarios para User
+            logger.info("=== Analizando TODOS los campos de usuarios ===")
+            datos_users_all = DatoArchivadoDinamico.objects.filter(tabla_origen='auth_user')
+            
+            # Recopilar TODOS los campos únicos de TODOS los usuarios
+            todos_campos_user = {}
+            for dato_user in datos_users_all:
+                for campo, valor in dato_user.datos_originales.items():
+                    if campo not in todos_campos_user:
+                        todos_campos_user[campo] = valor
+            
+            logger.info(f"📊 Total de campos únicos encontrados en usuarios: {len(todos_campos_user)}")
+            logger.info(f"📋 Campos: {list(todos_campos_user.keys())}")
+            
+            # Crear TODOS los campos necesarios
+            if todos_campos_user:
+                campos_agregados_user = agregar_campos_faltantes_a_modelo(User, todos_campos_user, logger)
+                if campos_agregados_user:
+                    campos_agregados.extend([f"User.{c}" for c in campos_agregados_user])
+                    logger.info(f"✅ Total de campos agregados a User: {len(campos_agregados_user)}")
+            
+            # Analizar TODOS los campos necesarios para Registro (Estudiantes y Profesores)
+            logger.info("=== Analizando TODOS los campos de registros ===")
+            datos_registros_all = DatoArchivadoDinamico.objects.filter(
+                Q(tabla_origen='Docencia_studentpersonalinformation') |
+                Q(tabla_origen='Docencia_teacherpersonalinformation') |
+                Q(tabla_origen='accounts_registro')
+            )
+            
+            # Recopilar TODOS los campos únicos de TODOS los registros
+            todos_campos_registro = {}
+            for dato_reg in datos_registros_all:
+                for campo, valor in dato_reg.datos_originales.items():
+                    if campo not in todos_campos_registro:
+                        todos_campos_registro[campo] = valor
+            
+            logger.info(f"📊 Total de campos únicos encontrados en registros: {len(todos_campos_registro)}")
+            logger.info(f"📋 Campos: {list(todos_campos_registro.keys())}")
+            
+            # Crear TODOS los campos necesarios
+            if todos_campos_registro:
+                campos_agregados_registro = agregar_campos_faltantes_a_modelo(Registro, todos_campos_registro, logger)
+                if campos_agregados_registro:
+                    campos_agregados.extend([f"Registro.{c}" for c in campos_agregados_registro])
+                    logger.info(f"✅ Total de campos agregados a Registro: {len(campos_agregados_registro)}")
+            
+            # 1. COMBINAR auth_user - COPIAR TODOS LOS CAMPOS
+            logger.info("=== Iniciando combinación de auth_user (TODOS LOS CAMPOS) ===")
+            datos_auth_user = DatoArchivadoDinamico.objects.filter(tabla_origen='auth_user')
+            
+            for dato in datos_auth_user:
+                try:
+                    datos = dato.datos_originales
+                    username = datos.get('username', '')
+                    email = datos.get('email', '')
+                    id_original = dato.id_original
+                    
+                    if not username:
+                        continue
+                    
+                    # Buscar si el usuario ya existe
+                    usuario_existente = User.objects.filter(
+                        Q(username=username) | (Q(email=email) if email else Q(pk=None))
+                    ).first()
+                    
+                    if usuario_existente:
+                        # COPIAR TODOS LOS CAMPOS del usuario archivado
+                        campos_copiados = copiar_todos_los_campos(
+                            usuario_existente, 
+                            datos, 
+                            campos_excluir=['id', 'pk', 'username'],  # No cambiar username
+                            logger=logger
+                        )
+                        
+                        # IMPORTANTE: Procesar contraseña (hasheada o texto plano)
+                        password_original = datos.get('password')
+                        if password_original:
+                            # Verificar si la contraseña ya está hasheada
+                            if password_original.startswith(('pbkdf2_sha256$', 'bcrypt$', 'argon2$', 'sha1$', 'md5$')):
+                                # Ya está hasheada, copiar directamente
+                                usuario_existente.password = password_original
+                                logger.info(f"✅ Contraseña hasheada copiada para usuario: {username}")
+                            else:
+                                # Está en texto plano, hashear antes de guardar
+                                usuario_existente.set_password(password_original)
+                                logger.info(f"✅ Contraseña en texto plano hasheada para usuario: {username}")
+                        
+                        usuario_existente.save()
+                        mapeo_usuarios[id_original] = usuario_existente
+                        estadisticas['usuarios_combinados'] += 1
+                        logger.info(f"✅ Usuario actualizado: {username} ({campos_copiados} campos copiados)")
+                    else:
+                        # Crear nuevo usuario CON TODOS LOS CAMPOS
+                        # Crear usuario base
+                        nuevo_usuario = User(username=username)
+                        
+                        # COPIAR TODOS LOS CAMPOS automáticamente
+                        campos_copiados = copiar_todos_los_campos(
+                            nuevo_usuario,
+                            datos,
+                            campos_excluir=['id', 'pk'],
+                            logger=logger
+                        )
+                        
+                        # IMPORTANTE: Procesar contraseña (hasheada o texto plano)
+                        password_original = datos.get('password')
+                        if password_original:
+                            # Verificar si la contraseña ya está hasheada
+                            if password_original.startswith(('pbkdf2_sha256$', 'bcrypt$', 'argon2$', 'sha1$', 'md5$')):
+                                # Ya está hasheada, copiar directamente
+                                nuevo_usuario.password = password_original
+                                logger.info(f"✅ Contraseña hasheada copiada para nuevo usuario: {username}")
+                            else:
+                                # Está en texto plano, hashear antes de guardar
+                                nuevo_usuario.set_password(password_original)
+                                logger.info(f"✅ Contraseña en texto plano hasheada para nuevo usuario: {username}")
+                        else:
+                            # Si no hay contraseña, establecer una no utilizable
+                            nuevo_usuario.set_unusable_password()
+                            logger.warning(f"⚠️ No se encontró contraseña para usuario: {username}")
+                        
+                        # Convertir fechas si son strings
+                        if hasattr(nuevo_usuario, 'date_joined') and isinstance(nuevo_usuario.date_joined, str):
+                            try:
+                                nuevo_usuario.date_joined = datetime.fromisoformat(
+                                    nuevo_usuario.date_joined.replace('Z', '+00:00')
+                                )
+                            except:
+                                nuevo_usuario.date_joined = datetime.now()
+                        
+                        if hasattr(nuevo_usuario, 'last_login') and isinstance(nuevo_usuario.last_login, str):
+                            try:
+                                nuevo_usuario.last_login = datetime.fromisoformat(
+                                    nuevo_usuario.last_login.replace('Z', '+00:00')
+                                )
+                            except:
+                                nuevo_usuario.last_login = None
+                        
+                        # Guardar el usuario
+                        try:
+                            nuevo_usuario.save()
+                            mapeo_usuarios[id_original] = nuevo_usuario
+                            estadisticas['usuarios_combinados'] += 1
+                            logger.info(f"✅ Usuario creado: {username} ({campos_copiados} campos copiados)")
+                        except IntegrityError as e:
+                            # Si hay error de duplicado, intentar buscar el usuario existente
+                            logger.warning(f"⚠️ Usuario {username} ya existe, buscando para actualizar...")
+                            usuario_duplicado = User.objects.filter(username=username).first()
+                            if usuario_duplicado:
+                                mapeo_usuarios[id_original] = usuario_duplicado
+                                logger.info(f"✅ Usuario duplicado encontrado y mapeado: {username}")
+                            else:
+                                logger.error(f"❌ No se pudo crear ni encontrar usuario: {username}")
+                                continue
+                            
+                except Exception as e:
+                    error_msg = f"Error procesando usuario {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 1.5. ASIGNAR GRUPOS A USUARIOS (auth_user_groups)
+            logger.info("=== Asignando grupos a usuarios ===")
+            from django.contrib.auth.models import Group
+            
+            datos_user_groups = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='auth_user_groups'
+            )
+            
+            for dato in datos_user_groups:
+                try:
+                    datos = dato.datos_originales
+                    user_id_original = datos.get('user_id')
+                    group_id_original = datos.get('group_id')
+                    
+                    if not user_id_original or not group_id_original:
+                        continue
+                    
+                    # Buscar el usuario en el mapeo
+                    usuario = mapeo_usuarios.get(user_id_original)
+                    
+                    if not usuario:
+                        logger.warning(f"No se encontró usuario para asignar grupo: user_id={user_id_original}")
+                        continue
+                    
+                    # Buscar el grupo en los datos archivados
+                    dato_grupo = DatoArchivadoDinamico.objects.filter(
+                        tabla_origen='auth_group',
+                        id_original=group_id_original
+                    ).first()
+                    
+                    if dato_grupo:
+                        nombre_grupo = dato_grupo.datos_originales.get('name')
+                        
+                        if nombre_grupo:
+                            # Buscar o crear el grupo
+                            grupo, created = Group.objects.get_or_create(name=nombre_grupo)
+                            
+                            # Asignar el usuario al grupo
+                            if not usuario.groups.filter(id=grupo.id).exists():
+                                usuario.groups.add(grupo)
+                                logger.info(f"Usuario {usuario.username} agregado al grupo {nombre_grupo}")
+                    
+                except Exception as e:
+                    error_msg = f"Error asignando grupo: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 2. IDENTIFICAR PROFESORES PRIMERO (para no agregarlos a Estudiantes)
+            logger.info("=== Identificando profesores ===")
+            user_ids_profesores = set()
+            datos_teacher_info_temp = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='Docencia_teacherpersonalinformation'
+            )
+            for dato_temp in datos_teacher_info_temp:
+                user_id = dato_temp.datos_originales.get('user_id')
+                if user_id:
+                    user_ids_profesores.add(user_id)
+            logger.info(f"📋 Total de user_ids identificados como profesores: {len(user_ids_profesores)}")
+            logger.info(f"📋 IDs de profesores: {user_ids_profesores}")
+            
+            # 2. COMBINAR Docencia_studentpersonalinformation con accounts_registro - TODOS LOS CAMPOS
+            logger.info("=== Iniciando combinación de Docencia_studentpersonalinformation (TODOS LOS CAMPOS) ===")
+            datos_student_info = DatoArchivadoDinamico.objects.filter(
+                Q(tabla_origen='Docencia_studentpersonalinformation') |
+                Q(tabla_origen='accounts_registro')
+            )
+            
+            for dato in datos_student_info:
+                try:
+                    datos = dato.datos_originales
+                    user_id_original = datos.get('user_id')
+                    
+                    if not user_id_original:
+                        continue
+                    
+                    # SALTAR si este usuario es un profesor
+                    if user_id_original in user_ids_profesores:
+                        logger.info(f"⏭️ Saltando user_id {user_id_original} porque es profesor")
+                        continue
+                    
+                    # Buscar usuario en el mapeo
+                    usuario = mapeo_usuarios.get(user_id_original)
+                    
+                    if not usuario:
+                        # Buscar en datos archivados
+                        dato_usuario = DatoArchivadoDinamico.objects.filter(
+                            tabla_origen='auth_user',
+                            id_original=user_id_original
+                        ).first()
+                        
+                        if dato_usuario:
+                            username = dato_usuario.datos_originales.get('username')
+                            email = dato_usuario.datos_originales.get('email')
+                            
+                            if username:
+                                usuario = User.objects.filter(username=username).first()
+                            if not usuario and email:
+                                usuario = User.objects.filter(email=email).first()
+                    
+                    if not usuario:
+                        logger.warning(f"No se encontró usuario para registro {dato.id_original}")
+                        continue
+                    
+                    # Buscar o crear registro
+                    registro, created = Registro.objects.get_or_create(user=usuario)
+                    
+                    # LOG: Mostrar datos que se van a copiar
+                    logger.info(f"📝 Datos a copiar para usuario {usuario.username}:")
+                    logger.info(f"   Campos disponibles: {list(datos.keys())}")
+                    
+                    # MAPEAR campos de inglés a español
+                    datos_mapeados = mapear_campos_ingles_espanol(datos, logger)
+                    
+                    # COPIAR TODOS LOS CAMPOS automáticamente (con mapeo aplicado)
+                    campos_copiados = copiar_todos_los_campos(
+                        registro,
+                        datos_mapeados,
+                        campos_excluir=['id', 'pk', 'user_id', 'user'],
+                        logger=logger
+                    )
+                    
+                    # Asegurar que el user esté establecido
+                    registro.user = usuario
+                    
+                    # LOG: Mostrar valores después de copiar
+                    logger.info(f"📊 Valores copiados al registro:")
+                    logger.info(f"   nacionalidad: {registro.nacionalidad}")
+                    logger.info(f"   carnet: {registro.carnet}")
+                    logger.info(f"   telephone: {registro.telephone}")
+                    logger.info(f"   address: {registro.address}")
+                    
+                    # Guardar el registro
+                    try:
+                        registro.save()
+                        estadisticas['registros_combinados'] += 1
+                        logger.info(f"✅ Registro {'creado' if created else 'actualizado'} para usuario {usuario.username} ({campos_copiados} campos copiados)")
+                        
+                        # Verificar que se guardó correctamente
+                        registro_verificado = Registro.objects.get(user=usuario)
+                        logger.info(f"🔍 Verificación - nacionalidad guardada: {registro_verificado.nacionalidad}")
+                        logger.info(f"🔍 Verificación - carnet guardado: {registro_verificado.carnet}")
+                        logger.info(f"🔍 Verificación - telephone guardado: {registro_verificado.telephone}")
+                    except Exception as save_error:
+                        logger.error(f"❌ Error al guardar registro: {str(save_error)}")
+                        raise
+                        
+                except Exception as e:
+                    error_msg = f"Error procesando registro {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    errores.append(error_msg)
+                    continue
+            
+            # 2.5. COMBINAR Docencia_teacherpersonalinformation con accounts_registro - TODOS LOS CAMPOS
+            logger.info("=== Iniciando combinación de Docencia_teacherpersonalinformation (TODOS LOS CAMPOS) ===")
+            datos_teacher_info = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='Docencia_teacherpersonalinformation'
+            )
+            
+            # Obtener o crear el grupo Profesores
+            grupo_profesores, _ = Group.objects.get_or_create(name='Profesores')
+            
+            for dato in datos_teacher_info:
+                try:
+                    datos = dato.datos_originales
+                    user_id_original = datos.get('user_id')
+                    
+                    if not user_id_original:
+                        continue
+                    
+                    # Buscar usuario en el mapeo
+                    usuario = mapeo_usuarios.get(user_id_original)
+                    
+                    if not usuario:
+                        # Buscar en datos archivados
+                        dato_usuario = DatoArchivadoDinamico.objects.filter(
+                            tabla_origen='auth_user',
+                            id_original=user_id_original
+                        ).first()
+                        
+                        if dato_usuario:
+                            username = dato_usuario.datos_originales.get('username')
+                            email = dato_usuario.datos_originales.get('email')
+                            
+                            if username:
+                                usuario = User.objects.filter(username=username).first()
+                            if not usuario and email:
+                                usuario = User.objects.filter(email=email).first()
+                    
+                    if not usuario:
+                        logger.warning(f"No se encontró usuario para registro de profesor {dato.id_original}")
+                        continue
+                    
+                    # ASIGNAR AL GRUPO PROFESORES y QUITAR de Estudiantes si está
+                    if not usuario.groups.filter(id=grupo_profesores.id).exists():
+                        usuario.groups.add(grupo_profesores)
+                        logger.info(f"✅ Usuario {usuario.username} agregado al grupo Profesores")
+                    
+                    # QUITAR del grupo Estudiantes si está
+                    try:
+                        grupo_estudiantes = Group.objects.get(name='Estudiantes')
+                        if usuario.groups.filter(id=grupo_estudiantes.id).exists():
+                            usuario.groups.remove(grupo_estudiantes)
+                            logger.info(f"🔄 Usuario {usuario.username} removido del grupo Estudiantes")
+                    except Group.DoesNotExist:
+                        pass
+                    
+                    # Buscar o crear registro
+                    registro, created = Registro.objects.get_or_create(user=usuario)
+                    
+                    # LOG: Mostrar datos que se van a copiar
+                    logger.info(f"📝 Datos a copiar para PROFESOR {usuario.username}:")
+                    logger.info(f"   Campos disponibles: {list(datos.keys())}")
+                    
+                    # MAPEAR campos de inglés a español
+                    datos_mapeados = mapear_campos_ingles_espanol(datos, logger)
+                    
+                    # COPIAR TODOS LOS CAMPOS automáticamente (con mapeo aplicado)
+                    campos_copiados = copiar_todos_los_campos(
+                        registro,
+                        datos_mapeados,
+                        campos_excluir=['id', 'pk', 'user_id', 'user'],
+                        logger=logger
+                    )
+                    
+                    # Asegurar que el user esté establecido
+                    registro.user = usuario
+                    
+                    # LOG: Mostrar valores después de copiar
+                    logger.info(f"📊 Valores copiados al registro de PROFESOR:")
+                    logger.info(f"   nacionalidad: {registro.nacionalidad}")
+                    logger.info(f"   carnet: {registro.carnet}")
+                    logger.info(f"   telephone: {registro.telephone}")
+                    logger.info(f"   address: {registro.address}")
+                    
+                    # Guardar el registro
+                    registro.save()
+                    estadisticas['registros_combinados'] += 1
+                    logger.info(f"✅ Registro de PROFESOR {'creado' if created else 'actualizado'} para usuario {usuario.username} ({campos_copiados} campos copiados)")
+                        
+                except Exception as e:
+                    error_msg = f"Error procesando registro de profesor {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 3. COMBINAR principal_cursoacademico
+            logger.info("=== Iniciando combinación de principal_cursoacademico ===")
+            datos_cursos_academicos = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_cursoacademico'
+            )
+            mapeo_cursos_academicos = {}
+            
+            for dato in datos_cursos_academicos:
+                try:
+                    datos = dato.datos_originales
+                    nombre = datos.get('nombre', '')
+                    
+                    if not nombre:
+                        continue
+                    
+                    # Buscar o crear curso académico
+                    curso_academico, created = CursoAcademico.objects.get_or_create(
+                        nombre=nombre,
+                        defaults={
+                            'activo': datos.get('activo', False),
+                            'archivado': datos.get('archivado', True)
+                        }
+                    )
+                    
+                    if not created:
+                        # Actualizar si existe
+                        if datos.get('activo') is not None:
+                            curso_academico.activo = datos.get('activo')
+                        curso_academico.save()
+                    
+                    mapeo_cursos_academicos[dato.id_original] = curso_academico
+                    estadisticas['cursos_academicos_combinados'] += 1
+                    logger.info(f"Curso académico {'creado' if created else 'actualizado'}: {nombre}")
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando curso académico {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 4. COMBINAR principal_curso
+            logger.info("=== Iniciando combinación de principal_curso ===")
+            datos_cursos = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_curso'
+            )
+            mapeo_cursos = {}
+            
+            for dato in datos_cursos:
+                try:
+                    datos = dato.datos_originales
+                    name = datos.get('name', '')
+                    teacher_id = datos.get('teacher_id')
+                    curso_academico_id = datos.get('curso_academico_id')
+                    
+                    if not name:
+                        continue
+                    
+                    # Buscar profesor
+                    teacher = mapeo_usuarios.get(teacher_id)
+                    if not teacher and teacher_id:
+                        # Buscar en datos archivados
+                        dato_teacher = DatoArchivadoDinamico.objects.filter(
+                            tabla_origen='auth_user',
+                            id_original=teacher_id
+                        ).first()
+                        if dato_teacher:
+                            username = dato_teacher.datos_originales.get('username')
+                            if username:
+                                teacher = User.objects.filter(username=username).first()
+                    
+                    # Buscar curso académico
+                    curso_academico = mapeo_cursos_academicos.get(curso_academico_id)
+                    if not curso_academico and curso_academico_id:
+                        dato_ca = DatoArchivadoDinamico.objects.filter(
+                            tabla_origen='principal_cursoacademico',
+                            id_original=curso_academico_id
+                        ).first()
+                        if dato_ca:
+                            nombre_ca = dato_ca.datos_originales.get('nombre')
+                            if nombre_ca:
+                                curso_academico = CursoAcademico.objects.filter(nombre=nombre_ca).first()
+                    
+                    if not teacher or not curso_academico:
+                        logger.warning(f"Faltan datos para curso {name}")
+                        continue
+                    
+                    # Buscar o crear curso
+                    curso, created = Curso.objects.get_or_create(
+                        name=name,
+                        curso_academico=curso_academico,
+                        defaults={
+                            'teacher': teacher,
+                            'description': datos.get('description', ''),
+                            'area': datos.get('area', 'idiomas'),
+                            'tipo': datos.get('tipo', 'curso'),
+                            'class_quantity': datos.get('class_quantity', 0),
+                            'status': datos.get('status', 'F'),
+                            'enrollment_deadline': datos.get('enrollment_deadline'),
+                            'start_date': datos.get('start_date'),
+                        }
+                    )
+                    
+                    if not created:
+                        # Actualizar campos si el curso ya existe
+                        curso.teacher = teacher
+                        curso.description = datos.get('description', curso.description)
+                        curso.save()
+                    
+                    mapeo_cursos[dato.id_original] = curso
+                    estadisticas['cursos_combinados'] += 1
+                    logger.info(f"Curso {'creado' if created else 'actualizado'}: {name}")
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando curso {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 5. COMBINAR principal_matriculas
+            logger.info("=== Iniciando combinación de principal_matriculas ===")
+            datos_matriculas = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_matriculas'
+            )
+            mapeo_matriculas = {}
+            
+            for dato in datos_matriculas:
+                try:
+                    datos = dato.datos_originales
+                    course_id = datos.get('course_id')
+                    student_id = datos.get('student_id')
+                    
+                    # Buscar curso y estudiante
+                    curso = mapeo_cursos.get(course_id)
+                    estudiante = mapeo_usuarios.get(student_id)
+                    
+                    if not curso or not estudiante:
+                        logger.warning(f"Faltan datos para matrícula {dato.id_original}")
+                        continue
+                    
+                    # Buscar o crear matrícula
+                    matricula, created = Matriculas.objects.get_or_create(
+                        course=curso,
+                        student=estudiante,
+                        defaults={
+                            'activo': datos.get('activo', True),
+                            'fecha_matricula': datos.get('fecha_matricula', date.today()),
+                            'estado': datos.get('estado', 'P'),
+                        }
+                    )
+                    
+                    if not created:
+                        # Actualizar si existe
+                        matricula.activo = datos.get('activo', matricula.activo)
+                        matricula.estado = datos.get('estado', matricula.estado)
+                        matricula.save()
+                    
+                    mapeo_matriculas[dato.id_original] = matricula
+                    estadisticas['matriculas_combinadas'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando matrícula {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 6. COMBINAR principal_asistencia
+            logger.info("=== Iniciando combinación de principal_asistencia ===")
+            datos_asistencias = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_asistencia'
+            )
+            
+            for dato in datos_asistencias:
+                try:
+                    datos = dato.datos_originales
+                    course_id = datos.get('course_id')
+                    student_id = datos.get('student_id')
+                    fecha = datos.get('date')
+                    
+                    curso = mapeo_cursos.get(course_id)
+                    estudiante = mapeo_usuarios.get(student_id)
+                    
+                    if not curso or not estudiante or not fecha:
+                        continue
+                    
+                    # Convertir fecha si es string
+                    if isinstance(fecha, str):
+                        try:
+                            fecha = datetime.strptime(fecha, '%Y-%m-%d').date()
+                        except:
+                            continue
+                    
+                    # Buscar o crear asistencia
+                    asistencia, created = Asistencia.objects.get_or_create(
+                        course=curso,
+                        student=estudiante,
+                        date=fecha,
+                        defaults={
+                            'presente': datos.get('presente', False)
+                        }
+                    )
+                    
+                    if not created:
+                        asistencia.presente = datos.get('presente', asistencia.presente)
+                        asistencia.save()
+                    
+                    estadisticas['asistencias_combinadas'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando asistencia {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 7. COMBINAR principal_calificaciones
+            logger.info("=== Iniciando combinación de principal_calificaciones ===")
+            datos_calificaciones = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_calificaciones'
+            )
+            mapeo_calificaciones = {}
+            
+            for dato in datos_calificaciones:
+                try:
+                    datos = dato.datos_originales
+                    matricula_id = datos.get('matricula_id')
+                    course_id = datos.get('course_id')
+                    student_id = datos.get('student_id')
+                    
+                    matricula = mapeo_matriculas.get(matricula_id)
+                    curso = mapeo_cursos.get(course_id)
+                    estudiante = mapeo_usuarios.get(student_id)
+                    
+                    if not matricula or not curso or not estudiante:
+                        continue
+                    
+                    # Buscar o crear calificación
+                    calificacion, created = Calificaciones.objects.get_or_create(
+                        matricula=matricula,
+                        course=curso,
+                        student=estudiante,
+                        defaults={
+                            'average': datos.get('average')
+                        }
+                    )
+                    
+                    if not created and datos.get('average'):
+                        calificacion.average = datos.get('average')
+                        calificacion.save()
+                    
+                    mapeo_calificaciones[dato.id_original] = calificacion
+                    estadisticas['calificaciones_combinadas'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando calificación {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 8. COMBINAR principal_notaindividual
+            logger.info("=== Iniciando combinación de principal_notaindividual ===")
+            datos_notas = DatoArchivadoDinamico.objects.filter(
+                tabla_origen='principal_notaindividual'
+            )
+            
+            for dato in datos_notas:
+                try:
+                    datos = dato.datos_originales
+                    calificacion_id = datos.get('calificacion_id')
+                    valor = datos.get('valor')
+                    fecha_creacion = datos.get('fecha_creacion')
+                    
+                    calificacion = mapeo_calificaciones.get(calificacion_id)
+                    
+                    if not calificacion or not valor:
+                        continue
+                    
+                    # Convertir fecha
+                    if isinstance(fecha_creacion, str):
+                        try:
+                            fecha_creacion = datetime.strptime(fecha_creacion, '%Y-%m-%d').date()
+                        except:
+                            fecha_creacion = date.today()
+                    
+                    # Crear nota (no verificar duplicados para permitir múltiples notas)
+                    nota = NotaIndividual.objects.create(
+                        calificacion=calificacion,
+                        valor=valor,
+                        fecha_creacion=fecha_creacion or date.today()
+                    )
+                    
+                    estadisticas['notas_combinadas'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando nota {dato.id_original}: {str(e)}"
+                    logger.error(error_msg)
+                    errores.append(error_msg)
+                    continue
+            
+            # 9. PROCESAR OTRAS TABLAS
+            logger.info("=== Procesando otras tablas ===")
+            tablas_procesadas = [
+                'auth_user', 'Docencia_studentpersonalinformation', 'accounts_registro',
+                'principal_cursoacademico', 'principal_curso', 'principal_matriculas',
+                'principal_asistencia', 'principal_calificaciones', 'principal_notaindividual'
+            ]
+            
+            otras_tablas = DatoArchivadoDinamico.objects.exclude(
+                tabla_origen__in=tablas_procesadas
+            ).values('tabla_origen').distinct()
+            
+            for tabla_info in otras_tablas:
+                tabla_nombre = tabla_info['tabla_origen']
+                count = DatoArchivadoDinamico.objects.filter(tabla_origen=tabla_nombre).count()
+                logger.info(f"Tabla no procesada: {tabla_nombre} ({count} registros)")
+                estadisticas['otras_tablas'] += count
+        
+        # Preparar respuesta
+        resultado = {
+            'success': True,
+            **estadisticas,
+            'campos_agregados': len(campos_agregados),
+            'campos_nuevos_detectados': campos_agregados[:10],
+            'errores_count': len(errores),
+            'mensaje': f'Combinación completada exitosamente'
+        }
+        
+        if errores:
+            resultado['errores_muestra'] = errores[:5]
+        
+        logger.info(f"=== Combinación completada ===")
+        logger.info(f"Estadísticas: {estadisticas}")
+        return JsonResponse(resultado)
+        
+    except Exception as e:
+        logger.error(f"Error general en combinación de datos: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        
+        return JsonResponse({
+            'success': False,
+            'error': f'Error al combinar datos: {str(e)}',
+            **{k: 0 for k in estadisticas.keys()}
+        })

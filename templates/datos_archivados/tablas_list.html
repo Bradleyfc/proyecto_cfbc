@@ -90,6 +90,9 @@
                             <a href="{% url 'datos_archivados:dashboard' %}" class="btn btn-primary">
                                 <i class="bi bi-arrow-left"></i> Volver al Dashboard
                             </a>
+                            <button type="button" class="btn btn-success" id="btnCombinar">
+                                <i class="bi bi-arrow-down-up"></i> Combinar Datos
+                            </button>
                             <button type="button" class="btn btn-info" id="btnModoSeleccion">
                                 <i class="bi bi-check-square"></i> Seleccionar Tablas
                             </button>
@@ -185,6 +188,107 @@
                     </div>
                     {% endif %}
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de Confirmación de Combinación -->
+<div class="modal fade" id="modalConfirmacionCombinacion" tabindex="-1" aria-labelledby="modalCombinacionLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title" id="modalCombinacionLabel">
+                    <i class="bi bi-arrow-down-up"></i> Combinar Datos Archivados
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle-fill"></i>
+                    <strong>¿Qué hace esta función?</strong>
+                    <p class="mb-0 mt-2">Esta función combinará <strong>TODA</strong> la información de las tablas archivadas con las tablas activas de su base de datos:</p>
+                    <ul class="mt-2 mb-0">
+                        <li><strong>Copia TODOS los campos</strong> de cada registro</li>
+                        <li><strong>Crea campos automáticamente</strong> si no existen en las tablas actuales</li>
+                        <li><strong>Preserva contraseñas hasheadas</strong> para que los usuarios puedan iniciar sesión</li>
+                    </ul>
+                </div>
+                
+                <div class="mb-3">
+                    <h6><i class="bi bi-diagram-3"></i> Proceso de Combinación:</h6>
+                    <ul class="list-group">
+                        <li class="list-group-item">
+                            <strong>auth_user</strong> → Se combinarán con la tabla <code>auth_user</code> actual
+                            <br><small class="text-muted">✓ Usuarios archivados se fusionarán con usuarios existentes</small>
+                            <br><small class="text-success"><strong>✓ Contraseñas se procesarán automáticamente:</strong></small>
+                            <br><small class="text-muted">&nbsp;&nbsp;&nbsp;• Hasheadas → Se copian directamente</small>
+                            <br><small class="text-muted">&nbsp;&nbsp;&nbsp;• Texto plano → Se hashean automáticamente</small>
+                            <br><small class="text-success">✓ Los usuarios podrán iniciar sesión con sus contraseñas originales</small>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>auth_user_groups</strong> → Se asignarán grupos a usuarios
+                            <br><small class="text-muted">✓ Los grupos se crearán automáticamente si no existen</small>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Docencia_studentpersonalinformation</strong> → Se combinarán con <code>accounts_registro</code>
+                            <br><small class="text-muted">✓ Los campos coincidentes se mantendrán</small>
+                            <br><small class="text-muted">✓ Los nuevos campos se agregarán automáticamente</small>
+                            <br><small class="text-info">✓ Los usuarios se asignarán al grupo <strong>Estudiantes</strong></small>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Docencia_teacherpersonalinformation</strong> → Se combinarán con <code>accounts_registro</code>
+                            <br><small class="text-muted">✓ Los campos coincidentes se mantendrán</small>
+                            <br><small class="text-muted">✓ Los nuevos campos se agregarán automáticamente</small>
+                            <br><small class="text-success"><strong>✓ Los usuarios se asignarán al grupo PROFESORES</strong></small>
+                        </li>
+                        <li class="list-group-item">
+                            <strong>Todas las demás tablas</strong> → Cursos, matrículas, asistencias, calificaciones, etc.
+                            <br><small class="text-muted">✓ Se combinarán automáticamente manteniendo las relaciones</small>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>Importante:</strong>
+                    <ul class="mb-0">
+                        <li>Los datos existentes no se eliminarán</li>
+                        <li>Los registros duplicados se actualizarán</li>
+                        <li>Los campos nuevos se agregarán a la tabla destino</li>
+                        <li><strong>TODOS los campos se copiarán automáticamente</strong></li>
+                        <li><strong>Los campos faltantes se crearán automáticamente</strong> en las tablas actuales</li>
+                        <li><strong>Las contraseñas se procesarán automáticamente:</strong>
+                            <ul>
+                                <li>Contraseñas hasheadas → Se copian directamente</li>
+                                <li>Contraseñas en texto plano → Se hashean automáticamente</li>
+                            </ul>
+                        </li>
+                        <li>Los usuarios podrán iniciar sesión con sus contraseñas originales</li>
+                        <li>Los grupos de usuarios se asignarán automáticamente</li>
+                        <li>Si un usuario ya existe, se actualizará en lugar de crear uno duplicado</li>
+                        <li>Este proceso puede tardar varios minutos dependiendo de la cantidad de datos</li>
+                    </ul>
+                </div>
+                
+                <div id="progressContainer" style="display: none;">
+                    <h6>Progreso de Combinación:</h6>
+                    <div class="progress mb-2" style="height: 25px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-success" 
+                             role="progressbar" style="width: 0%">0%</div>
+                    </div>
+                    <div id="progressMessage" class="text-center">
+                        <small class="text-muted">Iniciando proceso...</small>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="btnCancelarCombinacion">
+                    <i class="bi bi-x-circle"></i> Cancelar
+                </button>
+                <button type="button" class="btn btn-success" id="btnConfirmarCombinacion">
+                    <i class="bi bi-arrow-down-up"></i> Sí, Combinar Datos
+                </button>
             </div>
         </div>
     </div>
@@ -621,6 +725,90 @@ document.addEventListener('DOMContentLoaded', function() {
         
         document.body.appendChild(form);
         form.submit();
+    });
+    
+    // Manejar botón de combinar datos
+    const btnCombinar = document.getElementById('btnCombinar');
+    const btnConfirmarCombinacion = document.getElementById('btnConfirmarCombinacion');
+    const btnCancelarCombinacion = document.getElementById('btnCancelarCombinacion');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressMessage = document.getElementById('progressMessage');
+    
+    btnCombinar.addEventListener('click', function() {
+        const modal = new bootstrap.Modal(document.getElementById('modalConfirmacionCombinacion'));
+        modal.show();
+    });
+    
+    btnConfirmarCombinacion.addEventListener('click', function() {
+        // Deshabilitar botones
+        btnConfirmarCombinacion.disabled = true;
+        btnCancelarCombinacion.disabled = true;
+        btnConfirmarCombinacion.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Procesando...';
+        
+        // Mostrar barra de progreso
+        progressContainer.style.display = 'block';
+        
+        // Realizar petición AJAX
+        fetch('{% url "datos_archivados:combinar_datos" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Actualizar progreso al 100%
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                progressBar.classList.remove('progress-bar-animated');
+                progressMessage.innerHTML = `
+                    <div class="alert alert-success mt-3">
+                        <i class="bi bi-check-circle-fill"></i>
+                        <strong>¡Combinación completada exitosamente!</strong>
+                        <ul class="mb-0 mt-2">
+                            <li><strong>Usuarios:</strong> ${data.usuarios_combinados || 0} combinados</li>
+                            <li><strong>Registros de estudiantes:</strong> ${data.registros_combinados || 0} combinados</li>
+                            <li><strong>Cursos académicos:</strong> ${data.cursos_academicos_combinados || 0} combinados</li>
+                            <li><strong>Cursos:</strong> ${data.cursos_combinados || 0} combinados</li>
+                            <li><strong>Matrículas:</strong> ${data.matriculas_combinadas || 0} combinadas</li>
+                            <li><strong>Asistencias:</strong> ${data.asistencias_combinadas || 0} combinadas</li>
+                            <li><strong>Calificaciones:</strong> ${data.calificaciones_combinadas || 0} combinadas</li>
+                            <li><strong>Notas individuales:</strong> ${data.notas_combinadas || 0} combinadas</li>
+                            <li><strong>Campos nuevos detectados:</strong> ${data.campos_agregados || 0}</li>
+                        </ul>
+                    </div>
+                `;
+                
+                // Recargar página después de 3 segundos
+                setTimeout(() => {
+                    window.location.reload();
+                }, 3000);
+            } else {
+                progressMessage.innerHTML = `
+                    <div class="alert alert-danger mt-3">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <strong>Error:</strong> ${data.error || 'Error desconocido'}
+                    </div>
+                `;
+                btnConfirmarCombinacion.disabled = false;
+                btnCancelarCombinacion.disabled = false;
+                btnConfirmarCombinacion.innerHTML = '<i class="bi bi-arrow-down-up"></i> Reintentar';
+            }
+        })
+        .catch(error => {
+            progressMessage.innerHTML = `
+                <div class="alert alert-danger mt-3">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>Error de conexión:</strong> ${error.message}
+                </div>
+            `;
+            btnConfirmarCombinacion.disabled = false;
+            btnCancelarCombinacion.disabled = false;
+            btnConfirmarCombinacion.innerHTML = '<i class="bi bi-arrow-down-up"></i> Reintentar';
+        });
     });
 });
 </script>
